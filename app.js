@@ -8,6 +8,7 @@
    ══════════════════════════════════════════════ */
 
 const LS_KEY = 'bible-typing-v1';
+const APP_TITLE = '솔까 김안숙 권사 전용 성경 타이핑';
 const $ = (sel, root = document) => root.querySelector(sel);
 
 /* 자동으로 채워지는 글자 (직접 치지 않아도 됨) */
@@ -314,7 +315,7 @@ async function loadChapter(code, ch, vi = 0) {
     b.classList.toggle('is-on', b.dataset.code === code);
   });
   refreshContinue();
-  document.title = `${book.name} ${chLabel(code, ch)} · 성경 타자`;
+  document.title = `${book.name} ${chLabel(code, ch)} · ${APP_TITLE}`;
   if (window.innerWidth > 860) el.typeInput.focus({ preventScroll: true });
 }
 
@@ -412,9 +413,11 @@ function renderStates() {
       cls += ' skip';
     } else if (r < pendFrom) {
       cls += typedReq[r] === verse.req[r] ? ' ok' : ' bad';
-    } else if (r < n) {
-      cls += ' pending';            // 조합 중인 글자 — 아직 판정하지 않음
-    } else if (r === n) {
+    } else if (composing && r < n) {
+      // 조합 중: 파란 표시는 마지막 한 글자에만
+      cls += r === n - 1 ? ' pending' : ' pending-rest';
+    } else if (!composing && r === n) {
+      // 조합 중이 아닐 때: 지금 칠 글자 한 칸만 파랑
       cls += ' cur';
       curEl = sp;
     } else {
@@ -423,7 +426,7 @@ function renderStates() {
     if (sp.className !== cls) sp.className = cls;
   }
 
-  if (curEl && !composing) keepCaretVisible(curEl);
+  if (curEl) keepCaretVisible(curEl);
 }
 
 function keepCaretVisible(elChar) {

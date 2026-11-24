@@ -6,7 +6,7 @@
 검증 항목
  A. 데이터 무결성 — 66권(구약 39 · 신약 27) · 1,189장 · 권별 JSON 로드
  B. PC 1280×800 레이아웃 (가로 넘침 없음, 주요 요소 보임)
- C. 한글 IME 조합 중 — 빨간 오타로 깜빡이지 않음 (composition 중 pending)
+ C. 한글 IME 조합 중 — 빨간 오타로 깜빡이지 않고, 파란 표시는 딱 1개
  D. 틀린 글자는 빨갛게, 고쳐 치면 바로 통과
  E. 한 절을 다 치면 자동으로 다음 절
  F. Enter — 미완성은 안내, 한 번 더 누르면 넘어감
@@ -15,6 +15,8 @@
  I. 도장판 · 달력
  J. JSON 내보내기 / 불러오기
  K. 좁은 화면(820 · 480) 가로 넘침 없음 + 성경 고르기 드로어
+ N. 제목(솔까 김안숙 권사 전용 성경 타이핑) — 페이지/상단 제목 · 1024~1600px · 폰에서 한 줄
+ O. 지금 치는 글자 파란색 1개만 (주황 커서 제거, 오타 빨강·맞은 글자 초록 유지)
  L. 콘솔 오류 0건
 """
 import functools
@@ -86,6 +88,48 @@ def state_of(page):
     return page.evaluate("() => JSON.parse(localStorage.getItem('bible-typing-v1') || '{}')")
 
 
+APP_TITLE = '솔까 김안숙 권사 전용 성경 타이핑'
+
+
+def highlights(page):
+    """본문에서 배경이 칠해진(하이라이트) 글자 목록"""
+    return page.evaluate("""() => [...document.querySelectorAll('#verseText .vch')]
+        .filter((e) => {
+            const c = getComputedStyle(e).backgroundColor;
+            if (c === 'transparent') return false;
+            const m = c.match(/[\\d.]+/g);
+            if (!m) return false;
+            return m.length < 4 || Number(m[3]) > 0.05;   // 전환 중인 거의 투명한 배경은 제외
+        })
+        .map((e) => ({ t: e.textContent, cls: e.className, bg: getComputedStyle(e).backgroundColor,
+                       color: getComputedStyle(e).color }))""")
+
+
+def rgb(text):
+    return [int(float(x)) for x in text[text.index('(') + 1:text.index(')')].split(',')[:3]]
+
+
+def is_blue(bg):
+    r, g, b = rgb(bg)
+    return b > r + 12 and b >= g + 6
+
+
+def header_metrics(page):
+    return page.evaluate("""() => {
+        const b = document.querySelector('.brand-text b');
+        const t = document.querySelector('.topbar-tools');
+        const bar = document.querySelector('.topbar-in');
+        const br = b.getBoundingClientRect(), tr = t.getBoundingClientRect();
+        return {
+            fs: parseFloat(getComputedStyle(b).fontSize), lineH: br.height,
+            clip: b.scrollWidth - b.clientWidth,
+            overlap: !(br.right <= tr.left + 1 || br.bottom <= tr.top + 1),
+            docOverflow: document.documentElement.scrollWidth - window.innerWidth,
+            barOverflow: bar.scrollWidth - bar.clientWidth,
+        };
+    }""")
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
 
@@ -128,6 +172,16 @@ with sync_playwright() as p:
     # ══════════════════════════════════════════════
     check('첫 화면 = 창세기 1장 1절', ref(page) == '창세기 1장 1절', ref(page))
     check('본문 표시', page.inner_text('#verseText').strip() == '태초에 하나님이 천지를 창조하시니라')
+
+    # ── 제목 (페이지 · 상단 머리글) ──
+    check('페이지 제목 = ' + APP_TITLE, APP_TITLE in page.title(), page.title())
+    brand = page.inner_text('.brand-text b').strip()
+    check('상단 머리글 제목 = ' + APP_TITLE, brand == APP_TITLE, brand)
+    html = page.evaluate("async () => (await fetch('index.html', {cache: 'no-store'})).text()")
+    check('index.html <title> 교체', f'<title>{APP_TITLE}</title>' in html)
+    check('index.html 캐시 버전 쿼리 (?v=2)', 'styles.css?v=2' in html and 'app.js?v=2' in html)
+    sw = page.evaluate("async () => (await fetch('sw.js', {cache: 'no-store'})).text()")
+    check('sw.js 캐시 버전 갱신', 'bible-typing-v2' in sw, sw[:60])
     overflow = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
     check('1280px 가로 넘침 없음', overflow <= 0, overflow)
     for sel in ['#picker', '#verseCard', '#typeInput', '#bookGrid', '.rail', '#verseChips']:
@@ -161,17 +215,36 @@ with sync_playwright() as p:
     check('IME: 조합 중 빨간 오타 없음', bad_n == 0, f'bad={bad_n}')
     check('IME: 조합 중인 글자는 pending 표시', pending_n == 1, f'pending={pending_n}')
 
+    # ── 조합 중: 파란 표시는 딱 1개, 주황 커서 없음 ──
+    hl = highlights(page)
+    check('조합 중: 파란 표시 1개만', len(hl) == 1 and 'pending' in hl[0]['cls'], hl)
+    check('조합 중: 주황(커서) 표시 없음', page.locator('#verseText .vch.cur').count() == 0,
+          page.locator('#verseText .vch.cur').count())
+    check('조합 중: 그 1개가 파랑', bool(hl) and is_blue(hl[0]['bg']), hl)
+    page.screenshot(path=os.path.join(SHOTS, '12_파란_하이라이트_조합중.png'))
+
     compose('다')          # 일부러 틀린 글자 조합
     page.wait_for_timeout(120)
     bad_n = page.locator('#verseText .vch.bad').count()
     check('IME: 틀린 글자도 조합 중에는 빨갛지 않음', bad_n == 0, f'bad={bad_n}')
+    check('조합 중: 글자가 바뀌어도 파란 표시는 1개', len(highlights(page)) == 1, highlights(page))
 
     commit('태초')
-    page.wait_for_timeout(120)
+    page.wait_for_timeout(300)
     ok_n = page.locator('#verseText .vch.ok').count()
     bad_n = page.locator('#verseText .vch.bad').count()
     check('IME: 조합 확정 후 맞은 글자 초록', ok_n == 2, f'ok={ok_n}')
     check('IME: 확정 후 남은 오타 없음', bad_n == 0, f'bad={bad_n}')
+
+    # ── 조합이 끝난 뒤: 지금 칠 글자 1개만 파랑 ──
+    hl = highlights(page)
+    check('확정 후: 지금 칠 글자 1개만 파랑', len(hl) == 1 and 'cur' in hl[0]['cls'], hl)
+    check('확정 후: 그 글자도 파랑', bool(hl) and is_blue(hl[0]['bg']), hl)
+    gold = page.evaluate("""() => [...document.querySelectorAll('#verseText .vch')]
+        .map((e) => getComputedStyle(e).backgroundColor)
+        .filter((c) => { const m = c.match(/\\d+/g); if (!m) return false;
+            const [r, g, b] = m.map(Number); return r > 200 && b < 210 && r > b + 20; })""")
+    check('확정 후: 주황/금색 표시 없음', len(gold) == 0, gold)
     page.screenshot(path=os.path.join(SHOTS, '02_타자_중.png'))
 
     # ══════════════════════════════════════════════
@@ -384,6 +457,26 @@ with sync_playwright() as p:
     page.wait_for_timeout(300)
     check('820px: 드로어 닫힘', not page.evaluate(
         "() => document.querySelector('#picker').classList.contains('is-open')"))
+
+    # ══════════════════════════════════════════════
+    # N. 긴 제목 레이아웃 (PC 1024~1600 · 폰)
+    # ══════════════════════════════════════════════
+    for label, w, h in [('1600', 1600, 900), ('1440', 1440, 900), ('1280', 1280, 800),
+                        ('1024', 1024, 768), ('860', 860, 800), ('390', 390, 844)]:
+        page.set_viewport_size({'width': w, 'height': h})
+        page.wait_for_timeout(280)
+        m = header_metrics(page)
+        check(f'{label}px: 제목 한 줄 · 잘림 없음', m['clip'] <= 0 and m['lineH'] <= m['fs'] * 1.6, m)
+        check(f'{label}px: 제목-버튼 겹침 없음', m['overlap'] is False, m)
+        check(f'{label}px: 머리글·화면 가로 넘침 없음',
+              m['docOverflow'] <= 0 and m['barOverflow'] <= 0, m)
+        check(f'{label}px: 제목 실제 문구 유지',
+              page.inner_text('.brand-text b').strip() == APP_TITLE, page.inner_text('.brand-text b'))
+        if label in ('1600', '1024'):
+            page.screenshot(path=os.path.join(SHOTS, f'13_제목_{label}.png'))
+    page.screenshot(path=os.path.join(SHOTS, '14_제목_폰390.png'))
+    page.set_viewport_size({'width': 1280, 'height': 800})
+    page.wait_for_timeout(250)
 
     # ══════════════════════════════════════════════
     # L. 콘솔 오류
