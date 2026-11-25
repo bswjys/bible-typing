@@ -71,6 +71,7 @@ build_data.py         개역개정 원본 JSON → 권별 data 파일 생성
 make_icons.py         꽃 아이콘 생성
 test_bible_typing.py  Playwright 검증 — 타자·IME·도장·저장·반응형
  test_social.py        Playwright 검증 — 함께 쓰기 실시간·등수·꽃잎·박수·완필 상장·PNG
+live_check.py         배포 후 라이브 주소 확인 (HTTP 200 · 실시간 모임 · 스크린샷)
 sw.js                 오프라인 캐시 (bible-typing-v3)
 ```
 
@@ -89,6 +90,8 @@ LD_LIBRARY_PATH=/workspace/tmp/libroot/usr/lib/x86_64-linux-gnu:/workspace/work/
   python3 test_bible_typing.py   # 66권 무결성 · IME · 자동 넘김 · 꽃 도장 · 저장/복원 · 반응형 · 콘솔 오류
 LD_LIBRARY_PATH=/workspace/.browserlibs/lib \
   python3 test_social.py         # 세 브라우저 실시간 등수(금·은·동) · 박수 · 완필 상장 · PNG · 모바일
+LD_LIBRARY_PATH=/workspace/.browserlibs/lib \
+  python3 live_check.py          # 라이브 주소에서 두 브라우저 실시간 · 스크린샷
 ```
 
 ## 함께 쓰기 저장소
