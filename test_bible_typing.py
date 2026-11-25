@@ -179,9 +179,9 @@ with sync_playwright() as p:
     check('상단 머리글 제목 = ' + APP_TITLE, brand == APP_TITLE, brand)
     html = page.evaluate("async () => (await fetch('index.html', {cache: 'no-store'})).text()")
     check('index.html <title> 교체', f'<title>{APP_TITLE}</title>' in html)
-    check('index.html 캐시 버전 쿼리 (?v=2)', 'styles.css?v=2' in html and 'app.js?v=2' in html)
+    check('index.html 캐시 버전 쿼리 (?v=3)', 'styles.css?v=3' in html and 'app.js?v=3' in html)
     sw = page.evaluate("async () => (await fetch('sw.js', {cache: 'no-store'})).text()")
-    check('sw.js 캐시 버전 갱신', 'bible-typing-v2' in sw, sw[:60])
+    check('sw.js 캐시 버전 갱신', 'bible-typing-v3' in sw, sw[:60])
     overflow = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
     check('1280px 가로 넘침 없음', overflow <= 0, overflow)
     for sel in ['#picker', '#verseCard', '#typeInput', '#bookGrid', '.rail', '#verseChips']:
@@ -330,8 +330,9 @@ with sync_playwright() as p:
     st = state_of(page)
     check('저장: 시편 117장 완료 표시', st['books']['psa']['117']['done'] is True, st['books'].get('psa'))
     check('저장: 꽃 도장 1개', len(st['stamps']) == 1, st['stamps'])
-    check('저장: 오늘 5절 · 1장 (창세기 3 + 시편 2)', st['days'] and list(st['days'].values())[0] == {'v': 5, 'c': 1},
-          st['days'])
+    day = list(st['days'].values())[0] if st.get('days') else {}
+    check('저장: 오늘 5절 · 1장 (창세기 3 + 시편 2)',
+          day.get('v') == 5 and day.get('c') == 1 and day.get('ch', 0) > 0, st.get('days'))
 
     page.click('#ovNext')
     page.wait_for_timeout(500)

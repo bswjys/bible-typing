@@ -9,6 +9,11 @@
 
 const LS_KEY = 'bible-typing-v1';
 const APP_TITLE = '솔까 김안숙 권사 전용 성경 타이핑';
+const DEFAULT_NAME = '김안숙 권사';
+const MEMBER_KEY = 'bible-typing-member-id';
+const ROOM_KEY = 'bible-typing-room';
+const SOCIAL_DB = 'https://baby-feeding-9f820-default-rtdb.asia-southeast1.firebasedatabase.app';
+const SOCIAL_ROOT = 'bible_typing_rooms';
 const $ = (sel, root = document) => root.querySelector(sel);
 
 /* 자동으로 채워지는 글자 (직접 치지 않아도 됨) */
@@ -83,6 +88,51 @@ const el = {
   ovNext: $('#ovNext'),
   ovBoard: $('#ovBoard'),
   ovClose: $('#ovClose'),
+  brandBadge: $('#brandBadge'),
+  shareBtn: $('#shareBtn'),
+  shareFlower: $('#shareFlower'),
+  shareDot: $('#shareDot'),
+  shareLabel: $('#shareLabel'),
+  shareCode: $('#shareCode'),
+  copyInvite: $('#copyInvite'),
+  openHall: $('#openHall'),
+  rankCard: $('#rankCard'),
+  rankList: $('#rankList'),
+  rankPeople: $('#rankPeople'),
+  rankEmpty: $('#rankEmpty'),
+  rankMe: $('#rankMe'),
+  rankInvite: $('#rankInvite'),
+  rankHall: $('#rankHall'),
+  shareOverlay: $('#shareOverlay'),
+  shareClose: $('#shareClose'),
+  shareDismiss: $('#shareDismiss'),
+  shareStart: $('#shareStart'),
+  shareCopy: $('#shareCopy'),
+  shareLeave: $('#shareLeave'),
+  shareStatus: $('#shareStatus'),
+  nickInput: $('#nickInput'),
+  roomInput: $('#roomInput'),
+  hallOverlay: $('#hallOverlay'),
+  hallClose: $('#hallClose'),
+  hallTabHall: $('#hallTabHall'),
+  hallTabCert: $('#hallTabCert'),
+  hallPaneHall: $('#hallPaneHall'),
+  hallPaneCert: $('#hallPaneCert'),
+  hallNote: $('#hallNote'),
+  certCount: $('#certCount'),
+  certGrid: $('#certGrid'),
+  certEmpty: $('#certEmpty'),
+  certPreview: $('#certPreview'),
+  certOverlay: $('#certOverlay'),
+  certCard: $('#certCard'),
+  certKicker: $('#certKicker'),
+  certTitle: $('#certTitle'),
+  certName: $('#certName'),
+  certBody: $('#certBody'),
+  certDate: $('#certDate'),
+  certPng: $('#certPng'),
+  certPrint: $('#certPrint'),
+  certClose: $('#certClose'),
   boardOverlay: $('#boardOverlay'),
   boardClose: $('#boardClose'),
   boardBody: $('#boardBody'),
@@ -122,6 +172,7 @@ function defaultState() {
     books: {},          // code -> { ch: { v:{verseIdx:ts}, done:bool, ts } }
     days: {},           // 'YYYY-MM-DD' -> { v: n, c: n }
     stamps: [],         // [{ id, d:'YYYY-MM-DD', code, ch, t }]
+    certs: [],          // 완필 상장 [{ id, kind:'book'|'all', code, name, chapters, date, ts }]
     last: { code: 'gen', ch: 1, vi: 0 },
     settings: { fs: 'md' },
   };
@@ -137,6 +188,7 @@ function loadState() {
       state.books = parsed.books || {};
       state.days = parsed.days || {};
       state.stamps = Array.isArray(parsed.stamps) ? parsed.stamps : [];
+      state.certs = Array.isArray(parsed.certs) ? parsed.certs : [];
       state.settings = Object.assign({ fs: 'md' }, parsed.settings || {});
       state.last = Object.assign({ code: 'gen', ch: 1, vi: 0 }, parsed.last || {});
       return;
@@ -521,8 +573,10 @@ function markVerseDone(vi) {
   const rec = ensureChapter(cur.code, cur.ch);
   if (rec.v[vi]) return false;
   rec.v[vi] = Date.now();
-  const d = state.days[TODAY] || (state.days[TODAY] = { v: 0, c: 0 });
+  const d = state.days[TODAY] || (state.days[TODAY] = { v: 0, c: 0, ch: 0 });
   d.v += 1;
+  // 오늘 완료한 글자 수 (띄어쓰기·문장부호 제외) — 오늘의 등수 동률 기준
+  d.ch = (Number(d.ch) || 0) + (verse ? verse.req.length : 0);
 
   // 다음에 칠 자리를 '이어서 치기' 위치로 저장
   const book = BOOKS[cur.code];
@@ -609,7 +663,7 @@ function finishChapter() {
   const first = !rec.done;
   rec.done = true;
   rec.ts = Date.now();
-  const d = state.days[TODAY] || (state.days[TODAY] = { v: 0, c: 0 });
+  const d = state.days[TODAY] || (state.days[TODAY] = { v: 0, c: 0, ch: 0 });
   if (first) {
     d.c += 1;
     state.stamps.push({ id: `${cur.code}-${cur.ch}-${Date.now()}`, d: TODAY, code: cur.code, ch: cur.ch, t: Date.now() });
@@ -617,7 +671,14 @@ function finishChapter() {
   saveNow();
   refreshProgressUI();
   refreshContinue();
+  const newCerts = syncCerts();
   showChapterOverlay(first, verses.length);
+  if (newCerts.length) {
+    const pick = newCerts[newCerts.length - 1];
+    setTimeout(() => {
+      if (el.certOverlay.hidden) openCert(pick);
+    }, 1150);
+  }
 }
 
 function showChapterOverlay(isNew, verseCount) {
@@ -693,6 +754,9 @@ function refreshProgressUI() {
   if (!el.boardOverlay.hidden) renderBoard();
   renderChapterInfo();
   updateBookDots();
+  renderRank();
+  socialPush();
+  updateCertCount();
 }
 
 function updateBookDots() {
@@ -784,6 +848,1029 @@ function renderBoard() {
   }
 }
 
+/* ══════════════════════════════════════════════
+   함께 쓰기 (Firebase RTDB · SSE) · 오늘의 등수 · 명예의 전당 · 상장
+   ══════════════════════════════════════════════ */
+const social = {
+  myId: '',
+  name: DEFAULT_NAME,
+  room: '',
+  mode: 'local',      // local | connecting | live | polling | offline | error
+  mirror: null,       // 방 스냅숏 { members:{}, claps:{} }
+  es: null,
+  pollTimer: null,
+  watchTimer: null,
+  lastEvent: 0,
+  fails: 0,
+  restarts: 0,
+  pushTimer: 0,
+  joined: false,
+  announced: false,
+  clapSeen: null,
+  wasFirst: null,
+  invited: false,
+};
+let certCur = null;
+
+const nameOf = () => social.name || (social.room ? '이름 미정' : DEFAULT_NAME);
+
+function mk(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+const dateKo = (d) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || ''));
+  if (!m) return String(d || '');
+  return `${m[1]}년 ${Number(m[2])}월 ${Number(m[3])}일`;
+};
+
+function normRoom(v) {
+  return String(v || '')
+    .replace(/\s+/g, '')
+    .replace(/[^0-9A-Za-z\uAC00-\uD7A3_-]/g, '')
+    .replace(/[a-z]/g, (c) => c.toUpperCase())
+    .slice(0, 12);
+}
+const roomValid = (c) => typeof c === 'string' && c.length >= 2 && c.length <= 12;
+const roomUrl = (suffix = '') =>
+  `${SOCIAL_DB}/${SOCIAL_ROOT}/${encodeURIComponent(social.room)}${suffix}`;
+const memberUrl = (id) => `${roomUrl('/members')}/${encodeURIComponent(id)}.json`;
+const clapNodeUrl = (target, key) =>
+  `${roomUrl('/claps')}/${encodeURIComponent(target)}/${encodeURIComponent(key)}.json`;
+
+function fbRequest(method, url, body) {
+  const opts = { method, cache: 'no-store' };
+  if (body !== undefined) {
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  return fetch(url, opts).then((res) => {
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.text();
+  });
+}
+
+/* ───────── 내 기록 ───────── */
+function countClaps(node) {
+  if (!node || typeof node !== 'object') return 0;
+  return Object.keys(node).length;
+}
+
+function mySnapshot() {
+  const t = computeTotals();
+  const d = state.days[TODAY] || { v: 0, c: 0, ch: 0 };
+  const books = {};
+  let count = 0;
+  Object.keys(state.books).forEach((code) => {
+    const meta = bookByCode[code];
+    if (!meta) return;
+    const rec = state.books[code];
+    for (let ch = 1; ch <= meta.chapters; ch++) {
+      const r = rec[ch];
+      if (!r || !r.done) return;
+    }
+    books[code] = true;
+    count += 1;
+  });
+  return {
+    name: nameOf(),
+    today: TODAY,
+    todayVerses: Number(d.v) || 0,
+    todayChars: Number(d.ch) || 0,
+    totalVerses: t.verses,
+    totalChapters: t.chapters,
+    bookCount: count,
+    books,
+    oneRead: t.chapters >= 1189,
+    stamps: t.stamps,
+    updatedAt: Date.now(),
+  };
+}
+
+/** 모임에 처음 들어올 때: 이 기기의 기록과 방에 있던 내 기록을 합산 (사라지지 않게) */
+function mergeSnap(mine, remote) {
+  if (!remote || typeof remote !== 'object') return mine;
+  const books = Object.assign({}, remote.books || {}, mine.books || {});
+  const sameDay = remote.today === TODAY;
+  return Object.assign({}, mine, {
+    totalVerses: Math.max(mine.totalVerses, Number(remote.totalVerses) || 0),
+    totalChapters: Math.max(mine.totalChapters, Number(remote.totalChapters) || 0),
+    bookCount: Object.keys(books).length,
+    books,
+    oneRead: mine.oneRead || !!remote.oneRead,
+    todayVerses: sameDay ? Math.max(mine.todayVerses, Number(remote.todayVerses) || 0) : mine.todayVerses,
+    todayChars: sameDay ? Math.max(mine.todayChars, Number(remote.todayChars) || 0) : mine.todayChars,
+    stamps: Math.max(mine.stamps, Number(remote.stamps) || 0),
+  });
+}
+
+/* ───────── 오늘의 등수 ───────── */
+function rowOf(id, m, claps, isMe) {
+  const today = m.today === TODAY;
+  return {
+    id,
+    isMe,
+    name: String(m.name || DEFAULT_NAME).slice(0, 16),
+    todayVerses: today ? Number(m.todayVerses) || 0 : 0,
+    todayChars: today ? Number(m.todayChars) || 0 : 0,
+    totalVerses: Number(m.totalVerses) || 0,
+    totalChapters: Number(m.totalChapters) || 0,
+    bookCount: Number(m.bookCount) || 0,
+    books: (m.books && typeof m.books === 'object') ? m.books : {},
+    oneRead: !!m.oneRead,
+    claps: countClaps(claps[id]),
+  };
+}
+
+function rankRows() {
+  const members = (social.mirror && social.mirror.members) || {};
+  const claps = (social.mirror && social.mirror.claps) || {};
+  const mine = mySnapshot();
+  const rows = [];
+  if (!social.room) {
+    rows.push(rowOf(social.myId || 'me', mine, claps, true));
+  } else {
+    const ids = new Set(Object.keys(members));
+    ids.add(social.myId);
+    ids.forEach((id) => {
+      const isMe = id === social.myId;
+      const data = isMe ? mergeSnap(mine, members[id]) : members[id];
+      if (!data || typeof data !== 'object') return;
+      rows.push(rowOf(id, data, claps, isMe));
+    });
+  }
+  rows.sort((a, b) =>
+    b.todayVerses - a.todayVerses ||
+    b.todayChars - a.todayChars ||
+    b.totalChapters - a.totalChapters ||
+    a.name.localeCompare(b.name, 'ko'));
+  rows.forEach((r, i) => { r.rank = i + 1; });
+  return rows;
+}
+
+function petalFor(rank) {
+  if (rank === 1) return { icon: '🌸', cls: 'gold', tag: '금꽃잎' };
+  if (rank === 2) return { icon: '🌸', cls: 'silver', tag: '은꽃' };
+  if (rank === 3) return { icon: '🌸', cls: 'bronze', tag: '동꽃' };
+  if (rank === 4) return { icon: '🌱', cls: 'sprout', tag: '새싹' };
+  if (rank === 5) return { icon: '🌷', cls: 'bud', tag: '꽃봉오리' };
+  return { icon: '·', cls: '', tag: '' };
+}
+
+function rankRowEl(r) {
+  const petal = petalFor(r.rank);
+  const li = mk('li', 'rank-row' + (r.isMe ? ' is-me' : '') + (r.rank === 1 ? ' is-first' : ''));
+  li.dataset.rank = String(r.rank);
+  li.dataset.member = r.id;
+  li.appendChild(mk('span', 'rank-no', String(r.rank)));
+  const p = mk('span', 'rank-petal ' + petal.cls, petal.icon);
+  p.title = petal.tag || `${r.rank}위`;
+  p.setAttribute('aria-label', petal.tag || `${r.rank}위`);
+  li.appendChild(p);
+  const name = mk('span', 'rank-name');
+  name.appendChild(mk('b', '', r.name));
+  if (r.isMe) name.appendChild(mk('span', 'me-tag', '나'));
+  if (petal.tag) name.appendChild(mk('em', 'rank-tag ' + petal.cls, petal.tag));
+  li.appendChild(name);
+  const score = mk('span', 'rank-score');
+  score.appendChild(mk('b', '', r.todayVerses.toLocaleString('ko-KR')));
+  score.appendChild(document.createTextNode('절'));
+  li.appendChild(score);
+  if (r.isMe || !social.room) {
+    const self = mk('span', 'clap-btn is-self', '👏 ' + r.claps);
+    self.title = '내가 받은 응원의 박수';
+    li.appendChild(self);
+  } else {
+    const b = mk('button', 'clap-btn', '👏 ' + r.claps);
+    b.type = 'button';
+    b.dataset.clap = r.id;
+    b.title = `${r.name}님께 응원의 박수 보내기`;
+    b.setAttribute('aria-label', `${r.name}님께 응원의 박수 ${r.claps}개 · 한 번 더 보내기`);
+    li.appendChild(b);
+  }
+  return li;
+}
+
+function renderRank() {
+  if (!el.rankList) return;
+  const rows = rankRows();
+  el.rankList.innerHTML = '';
+  rows.slice(0, 5).forEach((r) => el.rankList.appendChild(rankRowEl(r)));
+
+  const me = rows.find((r) => r.isMe);
+  const outside = me && me.rank > 5;
+  el.rankMe.hidden = !outside;
+  if (outside) {
+    el.rankMe.textContent = `내 순위 ${me.rank}위 · 오늘 ${me.todayVerses.toLocaleString('ko-KR')}절 (${me.todayChars.toLocaleString('ko-KR')}자)`;
+  }
+  el.rankEmpty.hidden = !!social.room || rows.some((r) => r.todayVerses > 0);
+  el.rankInvite.hidden = !!social.room;
+  const playing = rows.filter((r) => r.todayVerses > 0).length;
+  el.rankPeople.hidden = !social.room;
+  el.rankPeople.textContent = social.room ? `${playing}명 참여` : '';
+  checkFirstPlace(rows);
+}
+
+function checkFirstPlace(rows) {
+  if (!social.room) { social.wasFirst = null; return; }
+  const leader = rows[0];
+  const iAmFirst = !!(leader && leader.isMe && leader.todayVerses > 0);
+  if (social.wasFirst === null) { social.wasFirst = iAmFirst; return; }
+  if (iAmFirst && !social.wasFirst) {
+    toast(`🌼 ${nameOf()}님이 오늘 1등 금꽃잎에 오르셨어요!`, 4200);
+    burst(window.innerWidth / 2, 130, 14, 170);
+  }
+  social.wasFirst = iAmFirst;
+}
+
+function sendClap(target) {
+  if (!social.room) { openShareSheet(); return; }
+  if (!target || target === social.myId) return;
+  const key = `${social.myId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  if (!social.mirror) social.mirror = { members: {}, claps: {} };
+  if (!social.mirror.claps) social.mirror.claps = {};
+  if (!social.mirror.claps[target]) social.mirror.claps[target] = {};
+  social.mirror.claps[target][key] = Date.now();
+  renderRank();
+  fbRequest('PUT', clapNodeUrl(target, key), Date.now())
+    .then(() => toast('👏 응원의 박수를 보냈어요!'))
+    .catch(() => toast('박수를 보내지 못했어요 · 연결을 확인해 주세요'));
+}
+
+function detectClap() {
+  const claps = (social.mirror && social.mirror.claps) || {};
+  const mine = countClaps(claps[social.myId]);
+  if (social.clapSeen === null) { social.clapSeen = mine; return; }
+  if (mine > social.clapSeen) {
+    toast('👏 누군가 응원의 박수를 보냈어요!', 3200);
+    burst(window.innerWidth / 2, 120, 9, 130);
+  }
+  social.clapSeen = mine;
+}
+
+/* ───────── 모임 연결 ───────── */
+function loadSocial() {
+  let customName = false;
+  try {
+    let id = localStorage.getItem(MEMBER_KEY);
+    if (!id || !/^[a-z0-9]{6,24}$/.test(id)) {
+      id = 'm' + Math.random().toString(36).slice(2, 10);
+      localStorage.setItem(MEMBER_KEY, id);
+    }
+    social.myId = id;
+    const raw = localStorage.getItem(ROOM_KEY);
+    if (raw) {
+      const c = JSON.parse(raw);
+      if (c && typeof c.name === 'string' && c.name.trim()) {
+        social.name = c.name.trim().slice(0, 16);
+        customName = true;
+      }
+      if (c && roomValid(normRoom(c.room))) social.room = normRoom(c.room);
+    }
+  } catch (e) { /* 무시 */ }
+  if (!social.name) social.name = DEFAULT_NAME;
+  try {
+    const linked = normRoom(new URLSearchParams(location.search).get('room') || '');
+    if (roomValid(linked)) {
+      social.room = linked;
+      if (!customName) social.name = '';   // 초대 링크로 처음 온 사람: 이름을 직접 정하게
+      social.invited = true;
+    }
+  } catch (e) { /* 무시 */ }
+  if (social.room) social.mode = 'connecting';
+  el.nickInput.value = social.name;
+  el.roomInput.value = social.room || '';
+}
+
+function saveSocial() {
+  try {
+    localStorage.setItem(ROOM_KEY, JSON.stringify({ room: social.room, name: social.name }));
+  } catch (e) { /* 무시 */ }
+}
+
+function setSocialMode(m) {
+  if (social.mode === m) { renderSocial(); return; }
+  social.mode = m;
+  renderSocial();
+  if (m === 'live' && social.room && !social.announced) {
+    social.announced = true;
+    toast(`함께 쓰는 방 ${social.room}에 들어왔어요 🌸`, 3000);
+  }
+}
+
+function renderSocial() {
+  if (!el.shareBtn) return;
+  const m = social.room ? social.mode : 'local';
+  el.shareBtn.dataset.mode = m;
+  el.brandBadge.hidden = !(social.room && (m === 'live' || m === 'polling' || m === 'connecting'));
+  el.copyInvite.hidden = !social.room;
+  const labels = {
+    local: '함께 쓰기 켜기',
+    connecting: '연결 중…',
+    live: '함께 쓰는 중',
+    polling: '함께 쓰는 중',
+    offline: '오프라인 · 함께 쓰기',
+    error: '연결 확인 필요',
+  };
+  const narrow = window.innerWidth <= 600;
+  el.shareLabel.textContent = (m === 'local' && narrow) ? '함께 쓰기' : (labels[m] || '함께 쓰기 켜기');
+  el.shareCode.textContent = social.room ? `· ${social.room}` : '';
+  el.shareCode.hidden = !(social.room && (m === 'live' || m === 'polling' || m === 'connecting'));
+
+  el.shareStatus.dataset.mode = m;
+  const nMembers = Object.keys((social.mirror && social.mirror.members) || {}).length;
+  if (!social.room) el.shareStatus.textContent = '가족공유 꺼짐 · 이 기기에만 저장돼요';
+  else if (m === 'connecting') el.shareStatus.textContent = `연결 중… (방 ${social.room})`;
+  else if (m === 'live' || m === 'polling') el.shareStatus.textContent = `● 함께 쓰는 중 · 방 ${social.room} · 함께 쓰는 사람 ${Math.max(nMembers, 1)}명`;
+  else if (m === 'offline') el.shareStatus.textContent = `오프라인 · 기록은 이 기기에 먼저 저장돼요 (방 ${social.room})`;
+  else el.shareStatus.textContent = `연결하지 못했어요 · 방 코드를 확인해 주세요 (방 ${social.room})`;
+
+  el.shareStart.textContent = social.room ? '연결하기' : '함께 쓰기 켜기';
+  el.shareLeave.hidden = !social.room;
+  el.shareCopy.hidden = !social.room;
+}
+
+function openShareSheet() {
+  el.nickInput.value = social.name || '';
+  el.roomInput.value = social.room || '';
+  renderSocial();
+  el.shareOverlay.hidden = false;
+  setTimeout(() => { try { el.roomInput.focus(); } catch (e) { /* 무시 */ } }, 120);
+}
+function closeShareSheet() { el.shareOverlay.hidden = true; }
+
+function randomRoom() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < 5; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
+
+function inviteLink() {
+  return `${location.origin}${location.pathname}?room=${encodeURIComponent(social.room)}`;
+}
+
+function copyInvite() {
+  if (!social.room) { openShareSheet(); return; }
+  const text = `🌸 솔까 김안숙 권사 전용 성경 타이핑\n함께 쓰는 방 「${social.room}」\n아래 링크를 열면 바로 들어와요.\n${inviteLink()}`;
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); toast('초대 링크를 복사했어요 🔗'); }
+    catch (e) { toast('링크: ' + inviteLink(), 6000); }
+    ta.remove();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => toast('초대 링크를 복사했어요 🔗')).catch(fallback);
+  } else fallback();
+}
+
+function joinRoom() {
+  const name = (el.nickInput.value || '').trim().slice(0, 16);
+  const room = normRoom(el.roomInput.value) || randomRoom();
+  if (!roomValid(room)) {
+    toast('방 코드는 2~12글자로 정해 주세요');
+    el.roomInput.focus();
+    return;
+  }
+  const changed = social.room !== room;
+  social.name = name;
+  social.room = room;
+  saveSocial();
+  el.nickInput.value = name;
+  el.roomInput.value = room;
+  if (changed) social.announced = false;
+  connectRoom();
+  toast(`함께 쓰는 방 ${room}에 연결하고 있어요`);
+}
+
+function leaveRoom() {
+  if (!social.room) return;
+  const room = social.room;
+  const id = social.myId;
+  closeStream();
+  stopPolling();
+  fetch(`${roomUrl('/members')}/${encodeURIComponent(id)}.json`, { method: 'DELETE', cache: 'no-store' })
+    .catch(() => { /* 무시 */ });
+  social.room = '';
+  social.mirror = null;
+  social.mode = 'local';
+  social.announced = false;
+  social.joined = false;
+  social.clapSeen = null;
+  social.wasFirst = null;
+  saveSocial();
+  renderSocial();
+  renderRank();
+  renderHall();
+  toast(`함께 쓰기를 껐어요 · 방 ${room} · 기록은 이 기기에 그대로 있어요`);
+}
+
+function connectRoom() {
+  closeStream();
+  stopPolling();
+  social.mirror = { members: {}, claps: {} };
+  social.joined = false;
+  social.clapSeen = null;
+  social.wasFirst = null;
+  social.restarts = 0;
+  social.fails = 0;
+  social.mode = social.room ? 'connecting' : 'local';
+  renderSocial();
+  renderRank();
+  renderHall();
+  if (!social.room) return;
+  if (navigator.onLine === false) { setSocialMode('offline'); return; }
+  openStream();
+  socialPush(0);
+}
+
+function normalizeRoom(data) {
+  const room = (data && typeof data === 'object') ? data : {};
+  if (!room.members || typeof room.members !== 'object') room.members = {};
+  if (!room.claps || typeof room.claps !== 'object') room.claps = {};
+  return room;
+}
+
+function openStream() {
+  closeStream();
+  if (!social.room) { setSocialMode('local'); return; }
+  if (typeof EventSource !== 'function') { startPolling(); return; }
+  let es;
+  try { es = new EventSource(roomUrl('.json')); }
+  catch (e) { startPolling(); return; }
+  social.es = es;
+  social.lastEvent = Date.now();
+
+  es.addEventListener('open', () => {
+    if (social.es !== es) return;
+    social.lastEvent = Date.now();
+    social.restarts = 0;
+    social.fails = 0;
+    setSocialMode('live');
+    startWatchdog();
+  });
+  const onEv = (ev) => {
+    if (social.es !== es) return;
+    social.lastEvent = Date.now();
+    onStream(ev.type || 'put', ev.data);
+  };
+  es.addEventListener('put', onEv);
+  es.addEventListener('patch', onEv);
+  es.addEventListener('keep-alive', () => {
+    if (social.es === es) social.lastEvent = Date.now();
+  });
+  es.onerror = () => {
+    if (social.es !== es) return;
+    social.lastEvent = 0;
+    if (es.readyState === 2) {          // CLOSED
+      try { es.close(); } catch (e) { /* 무시 */ }
+      social.es = null;
+      social.restarts += 1;
+      if (social.restarts >= 2) { startPolling(); return; }
+      setSocialMode('connecting');
+      setTimeout(() => { if (social.room && navigator.onLine !== false) openStream(); }, 1500);
+    } else {
+      setSocialMode('connecting');
+    }
+  };
+}
+
+function closeStream() {
+  if (social.es) {
+    try { social.es.close(); } catch (e) { /* 무시 */ }
+    social.es = null;
+  }
+  if (social.watchTimer) { clearInterval(social.watchTimer); social.watchTimer = null; }
+}
+
+function startWatchdog() {
+  if (social.watchTimer) clearInterval(social.watchTimer);
+  social.watchTimer = setInterval(() => {
+    if (social.mode !== 'live') return;
+    if (navigator.onLine === false) { setSocialMode('offline'); return; }
+    if (!social.lastEvent) return;
+    if (Date.now() - social.lastEvent > 26000) {
+      social.lastEvent = Date.now();
+      openStream();
+    }
+  }, 15000);
+}
+
+function startPolling() {
+  closeStream();
+  if (!social.room) { setSocialMode('local'); return; }
+  if (social.pollTimer) return;
+  setSocialMode('polling');
+  const tick = () => {
+    fetch(roomUrl('.json'), { cache: 'no-store' })
+      .then((res) => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+      .then((data) => {
+        social.fails = 0;
+        social.mirror = normalizeRoom(data);
+        if (social.mode !== 'polling') setSocialMode('polling');
+        afterRoomUpdate();
+      })
+      .catch(() => {
+        social.fails += 1;
+        if (navigator.onLine === false) setSocialMode('offline');
+        else if (social.fails >= 3) setSocialMode('error');
+      });
+  };
+  tick();
+  social.pollTimer = setInterval(tick, 5000);
+}
+
+function stopPolling() {
+  if (social.pollTimer) { clearInterval(social.pollTimer); social.pollTimer = null; }
+}
+
+function setPath(root, path, data, patch) {
+  const parts = path.split('/');
+  let node = root;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const k = parts[i];
+    if (typeof node[k] !== 'object' || node[k] === null) node[k] = {};
+    node = node[k];
+  }
+  const last = parts[parts.length - 1];
+  if (data === null || data === undefined) { delete node[last]; return; }
+  if (patch && node[last] && typeof node[last] === 'object' && typeof data === 'object' && !Array.isArray(data)) {
+    Object.keys(data).forEach((k) => {
+      if (data[k] === null) delete node[last][k];
+      else node[last][k] = data[k];
+    });
+  } else {
+    node[last] = data;
+  }
+}
+
+function onStream(kind, raw) {
+  let msg;
+  try { msg = JSON.parse(raw); } catch (e) { return; }
+  if (!msg || typeof msg.path !== 'string') return;
+  const path = msg.path.replace(/^\/+|\/+$/g, '');
+  if (!path) {
+    social.mirror = normalizeRoom(kind === 'patch' ? Object.assign({}, social.mirror || {}, msg.data || {}) : msg.data);
+  } else {
+    if (!social.mirror) social.mirror = { members: {}, claps: {} };
+    setPath(social.mirror, path, msg.data, kind === 'patch');
+  }
+  if (social.mode !== 'live') setSocialMode('live');
+  afterRoomUpdate();
+}
+
+function afterRoomUpdate() {
+  detectClap();
+  renderRank();
+  renderHall();
+  renderSocial();
+}
+
+function socialPush(delay = 350) {
+  if (!social.room) return;
+  clearTimeout(social.pushTimer);
+  social.pushTimer = setTimeout(() => {
+    if (!social.room) return;
+    const remote = social.mirror && social.mirror.members && social.mirror.members[social.myId];
+    const snap = mergeSnap(mySnapshot(), remote);
+    if (!social.mirror) social.mirror = { members: {}, claps: {} };
+    if (!social.mirror.members) social.mirror.members = {};
+    social.mirror.members[social.myId] = snap;
+    renderRank();
+    if (!el.hallOverlay.hidden) renderHall();
+    fbRequest('PUT', memberUrl(social.myId), snap).catch(() => {
+      if (navigator.onLine === false) setSocialMode('offline');
+    });
+  }, delay);
+}
+
+/* ───────── 명예의 전당 · 내 상장함 ───────── */
+function certsOf() {
+  return Array.isArray(state.certs) ? state.certs.slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)) : [];
+}
+function updateCertCount() {
+  if (el.certCount) el.certCount.textContent = String(certsOf().length);
+}
+
+function renderHall() {
+  updateCertCount();
+  if (!el.hallPaneHall) return;
+  const rows = rankRows().slice();
+  rows.sort((a, b) =>
+    b.totalChapters - a.totalChapters ||
+    b.bookCount - a.bookCount ||
+    b.claps - a.claps ||
+    a.name.localeCompare(b.name, 'ko'));
+  rows.forEach((r, i) => { r.hallRank = i + 1; });
+
+  el.hallPaneHall.innerHTML = '';
+  rows.forEach((r) => {
+    const row = mk('div', 'hall-row' + (r.isMe ? ' is-me' : '') + (r.hallRank === 1 && (r.totalChapters || r.bookCount) ? ' is-top' : ''));
+    row.dataset.member = r.id;
+    row.appendChild(mk('div', 'hall-rank', String(r.hallRank)));
+
+    const main = mk('div', 'hall-main');
+    const nameLine = mk('div', 'hall-name');
+    nameLine.appendChild(mk('b', '', r.name));
+    if (r.isMe) nameLine.appendChild(mk('span', 'hall-flag me', '나'));
+    if (r.oneRead) nameLine.appendChild(mk('span', 'hall-flag read', '📖 1독 달성'));
+    main.appendChild(nameLine);
+
+    const sub = mk('div', 'hall-sub');
+    sub.innerHTML = `마친 장 <b>${r.totalChapters.toLocaleString('ko-KR')}</b>장 · 완필 <b>${r.bookCount}</b>권 · 누적 <b>${r.totalVerses.toLocaleString('ko-KR')}</b>절`;
+    main.appendChild(sub);
+
+    const codes = Object.keys(r.books || {});
+    if (codes.length) {
+      const books = mk('div', 'hall-books');
+      codes.slice(0, 6).forEach((code) => {
+        const meta = bookByCode[code];
+        if (!meta) return;
+        books.appendChild(mk('span', 'hall-book', `${meta.name} 완필`));
+      });
+      if (codes.length > 6) books.appendChild(mk('span', 'hall-book', `외 ${codes.length - 6}권`));
+      main.appendChild(books);
+    }
+    row.appendChild(main);
+
+    const side = mk('div', 'hall-side');
+    side.innerHTML = `<span class="hall-claps">👏 ${r.claps}</span><span class="hall-sub">오늘 ${r.todayVerses.toLocaleString('ko-KR')}절</span>`;
+    row.appendChild(side);
+    el.hallPaneHall.appendChild(row);
+  });
+
+  if (!el.hallNote) return;
+  if (!social.room) {
+    el.hallNote.innerHTML = '함께 쓰기를 켜면 가족·친구의 완필 기록도 이곳에 모여요.';
+  } else {
+    const n = Object.keys((social.mirror && social.mirror.members) || {}).length;
+    el.hallNote.innerHTML = `함께 쓰는 방 <b>${social.room}</b> · ${Math.max(n, 1)}명 · 박수는 순위표의 👏 버튼으로 보내요.`;
+  }
+  renderCerts();
+}
+
+function renderCerts() {
+  if (!el.certGrid) return;
+  const list = certsOf();
+  el.certGrid.innerHTML = '';
+  el.certEmpty.hidden = list.length > 0;
+  list.forEach((c) => {
+    const btn = mk('button', 'cert-card');
+    btn.type = 'button';
+    btn.dataset.cert = c.id;
+    btn.appendChild(mk('span', 'cc-flower', c.kind === 'all' ? '🏆' : '📜'));
+    btn.appendChild(mk('span', 'cc-name', c.kind === 'all' ? '성경 1독 완필' : `${c.name} 완필`));
+    btn.appendChild(mk('span', 'cc-meta', c.kind === 'all' ? `전 1,189장 · ${dateKo(c.date)}` : `전 ${c.chapters}${unitOf(c.code || '')} · ${dateKo(c.date)}`));
+    btn.appendChild(mk('span', 'cc-open', '상장 열기 →'));
+    btn.addEventListener('click', () => openCert(c));
+    el.certGrid.appendChild(btn);
+  });
+}
+
+function openHall(pane) {
+  setHallPane(pane || 'hall');
+  renderHall();
+  el.hallOverlay.hidden = false;
+}
+function setHallPane(pane) {
+  const cert = pane === 'cert';
+  el.hallTabHall.classList.toggle('is-on', !cert);
+  el.hallTabCert.classList.toggle('is-on', cert);
+  el.hallPaneHall.hidden = cert;
+  el.hallPaneCert.hidden = !cert;
+  if (cert) renderCerts();
+}
+
+/* ───────── 완필 상장 ───────── */
+function syncCerts() {
+  if (!Array.isArray(state.certs)) state.certs = [];
+  const have = new Set(state.certs.map((c) => c.id));
+  const added = [];
+  Object.keys(state.books).forEach((code) => {
+    const meta = bookByCode[code];
+    if (!meta || !meta.chapters) return;
+    const rec = state.books[code];
+    for (let ch = 1; ch <= meta.chapters; ch++) {
+      const r = rec[ch];
+      if (!r || !r.done) return;
+    }
+    const id = 'book-' + code;
+    if (have.has(id)) return;
+    const cert = {
+      id, kind: 'book', code, name: meta.name, short: meta.short,
+      chapters: meta.chapters, date: TODAY, ts: Date.now(),
+    };
+    state.certs.push(cert);
+    have.add(id);
+    added.push(cert);
+  });
+  const total = computeTotals().chapters;
+  if (total >= 1189 && !have.has('all-read')) {
+    const cert = { id: 'all-read', kind: 'all', name: '성경', chapters: 1189, date: TODAY, ts: Date.now() };
+    state.certs.push(cert);
+    have.add('all-read');
+    added.push(cert);
+  }
+  if (added.length) { saveNow(); updateCertCount(); renderCerts(); }
+  return added;
+}
+
+function fillCert(cert) {
+  const isAll = cert.kind === 'all';
+  el.certKicker.textContent = '성경 타자 · 완필 상장';
+  el.certTitle.textContent = isAll ? '성 경 1 독 상 장' : '완 필 상 장';
+  el.certName.textContent = nameOf();
+  el.certBody.innerHTML = isAll
+    ? '성경 전 <b>1,189장</b>을 모두 완필하시어<br>1독을 이루셨습니다.'
+    : `${cert.name} 전 <b>${cert.chapters}${unitOf(cert.code || '')}</b>을 정성으로 완필하셨습니다.`;
+  el.certDate.textContent = dateKo(cert.date);
+}
+
+function openCert(cert) {
+  if (!cert) return;
+  certCur = cert;
+  fillCert(cert);
+  el.certOverlay.hidden = false;
+  const r = el.certCard.getBoundingClientRect();
+  setTimeout(() => burst(r.left + r.width / 2, r.top + 40, 12, 160), 200);
+}
+function closeCert() { el.certOverlay.hidden = true; }
+
+function certCanvas(cert) {
+  const W = 1400, H = 990;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  const SERIF = '"Noto Serif KR","Noto Serif CJK KR","Nanum Myeongjo","Batang","Apple SD Gothic Neo",serif';
+  const UI = '"Noto Sans KR","Noto Sans CJK KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif';
+  const isAll = cert.kind === 'all';
+  const name = nameOf();
+
+  g.fillStyle = '#FFFDF6';
+  g.fillRect(0, 0, W, H);
+  g.strokeStyle = '#D9B24C'; g.lineWidth = 16; g.strokeRect(30, 30, W - 60, H - 60);
+  g.strokeStyle = '#B8912A'; g.lineWidth = 2; g.strokeRect(56, 56, W - 112, H - 112);
+  g.strokeStyle = 'rgba(184,145,42,.4)'; g.lineWidth = 1; g.strokeRect(74, 74, W - 148, H - 148);
+  g.fillStyle = 'rgba(217,178,76,.55)';
+  g.font = `28px serif`;
+  g.textAlign = 'left'; g.fillText('❧', 82, 112);
+  g.textAlign = 'right'; g.fillText('❧', W - 82, 112);
+  g.textAlign = 'left'; g.fillText('❧', 82, H - 82);
+  g.textAlign = 'right'; g.fillText('❧', W - 82, H - 82);
+
+  g.textAlign = 'center';
+  g.fillStyle = '#A98A34';
+  g.font = `800 21px ${UI}`;
+  drawSpaced(g, '성 경 타 자  ·  완 필  상 장', W / 2, 172, 6);
+
+  g.font = '52px serif';
+  g.fillText('🌸', W / 2, 246);
+
+  g.fillStyle = '#6B4B1C';
+  g.font = `800 100px ${SERIF}`;
+  drawSpaced(g, isAll ? '성 경 1 독 상 장' : '완 필 상 장', W / 2, 372, isAll ? 8 : 18);
+
+  g.strokeStyle = '#C9A227'; g.lineWidth = 1.5;
+  g.beginPath(); g.moveTo(W * 0.26, 420); g.lineTo(W * 0.44, 420); g.stroke();
+  g.beginPath(); g.moveTo(W * 0.56, 420); g.lineTo(W * 0.74, 420); g.stroke();
+  g.fillStyle = '#C9A227'; g.font = `16px serif`; g.fillText('✿', W / 2, 426);
+
+  g.fillStyle = '#3B2A16';
+  g.font = `800 66px ${SERIF}`;
+  g.fillText(name, W / 2, 540);
+
+  g.fillStyle = '#5A4630';
+  g.font = `600 34px ${SERIF}`;
+  if (isAll) {
+    drawRich(g, '성경 전 ', '1,189장', '을 모두 완필하시어', W / 2, 626, 34, SERIF);
+    g.font = `600 34px ${SERIF}`;
+    g.fillStyle = '#5A4630';
+    g.fillText('1독을 이루셨습니다.', W / 2, 684);
+  } else {
+    drawRich(g, `${cert.name} 전 `, `${cert.chapters}${unitOf(cert.code || '')}`, '을 정성으로', W / 2, 626, 34, SERIF);
+    g.fillStyle = '#5A4630';
+    g.font = `600 34px ${SERIF}`;
+    g.fillText('완필하셨습니다.', W / 2, 684);
+  }
+
+  g.fillStyle = '#7B6A57';
+  g.font = `700 27px ${UI}`;
+  drawSpaced(g, dateKo(cert.date), W / 2, 806, 3);
+
+  // 금빛 직인
+  const cx = W - 200, cy = H - 190, rad = 88;
+  const grad = g.createRadialGradient(cx - 30, cy - 34, 10, cx, cy, rad);
+  grad.addColorStop(0, '#F6E2A2');
+  grad.addColorStop(0.55, '#D9B24C');
+  grad.addColorStop(1, '#B8912A');
+  g.save();
+  g.translate(cx, cy);
+  g.rotate(-11 * Math.PI / 180);
+  g.beginPath(); g.arc(0, 0, rad, 0, Math.PI * 2);
+  g.fillStyle = grad; g.fill();
+  g.lineWidth = 3; g.strokeStyle = 'rgba(255,255,255,.55)'; g.stroke();
+  g.beginPath(); g.arc(0, 0, rad - 12, 0, Math.PI * 2);
+  g.lineWidth = 1.5; g.strokeStyle = 'rgba(255,247,223,.55)'; g.stroke();
+  g.fillStyle = '#FFFDF3';
+  g.textAlign = 'center';
+  g.font = `800 40px ${SERIF}`;
+  g.fillText('완필', 0, 6);
+  g.font = `800 12px ${UI}`;
+  drawSpaced(g, '성경타자', 0, 36, 3);
+  g.restore();
+
+  return cv;
+}
+
+function drawSpaced(g, text, x, y, spacing) {
+  const chars = Array.from(text);
+  const widths = chars.map((c) => g.measureText(c).width);
+  const total = widths.reduce((n, w) => n + w, 0) + spacing * (chars.length - 1);
+  let cx = x - total / 2;
+  const align = g.textAlign;
+  g.textAlign = 'left';
+  chars.forEach((c, i) => {
+    g.fillText(c, cx, y);
+    cx += widths[i] + spacing;
+  });
+  g.textAlign = align;
+}
+
+function drawRich(g, pre, bold, post, x, y, size, font) {
+  g.save();
+  const w1 = g.measureText(pre).width;
+  g.font = `800 ${size}px ${font}`;
+  const w2 = g.measureText(bold).width;
+  g.font = `600 ${size}px ${font}`;
+  const w3 = g.measureText(post).width;
+  const total = w1 + w2 + w3;
+  let cx = x - total / 2;
+  g.textAlign = 'left';
+  g.fillStyle = '#5A4630';
+  g.font = `600 ${size}px ${font}`;
+  g.fillText(pre, cx, y);
+  cx += w1;
+  g.fillStyle = '#8A6420';
+  g.font = `800 ${size}px ${font}`;
+  g.fillText(bold, cx, y);
+  cx += w2;
+  g.fillStyle = '#5A4630';
+  g.font = `600 ${size}px ${font}`;
+  g.fillText(post, cx, y);
+  g.restore();
+}
+
+function downloadCert() {
+  const cert = certCur;
+  if (!cert) return;
+  let cv;
+  try { cv = certCanvas(cert); }
+  catch (e) { console.warn(e); toast('상장 이미지를 만들지 못했어요'); return; }
+  const fname = `완필상장-${cert.kind === 'all' ? '성경1독' : cert.name}.png`;
+  const save = (blob) => {
+    if (!blob) { toast('상장 이미지를 만들지 못했어요'); return; }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast('상장을 PNG 이미지로 저장했어요 📜');
+  };
+  if (cv.toBlob) cv.toBlob(save, 'image/png');
+  else save(null);
+}
+
+function printCert() {
+  if (!certCur) return;
+  document.body.classList.add('print-cert');
+  const done = () => {
+    document.body.classList.remove('print-cert');
+    window.removeEventListener('afterprint', done);
+  };
+  window.addEventListener('afterprint', done);
+  try { window.print(); } catch (e) { /* 무시 */ }
+  setTimeout(done, 1500);
+}
+
+/* 오늘 완료한 글자 수가 예전 기록에 없으면 한 번 계산해 채운다 */
+async function ensureTodayChars() {
+  const d = state.days[TODAY];
+  if (!d || Number(d.ch) > 0) return;
+  const codes = new Set();
+  Object.keys(state.books).forEach((code) => {
+    Object.keys(state.books[code]).forEach((ch) => {
+      const rec = state.books[code][ch];
+      Object.keys(rec.v || {}).forEach((vi) => {
+        if (ymd(new Date(rec.v[vi])) === TODAY) codes.add(code);
+      });
+    });
+  });
+  if (!codes.size) return;
+  let sum = 0;
+  for (const code of codes) {
+    try {
+      const book = await getBook(code);
+      Object.keys(state.books[code]).forEach((ch) => {
+        const rec = state.books[code][ch];
+        const verses = book.chapters[Number(ch) - 1] || [];
+        Object.keys(rec.v || {}).forEach((vi) => {
+          if (ymd(new Date(rec.v[vi])) !== TODAY) return;
+          const t = verses[Number(vi)];
+          if (t) sum += Array.from(t).filter((c) => !isSkip(c)).length;
+        });
+      });
+    } catch (e) { /* 무시 */ }
+  }
+  if (sum > 0) { d.ch = sum; saveNow(); }
+}
+
+function bindSocial() {
+  el.shareBtn.addEventListener('click', openShareSheet);
+  el.copyInvite.addEventListener('click', (e) => { e.stopPropagation(); copyInvite(); });
+  el.openHall.addEventListener('click', () => openHall('hall'));
+  el.rankHall.addEventListener('click', () => openHall('hall'));
+  el.rankInvite.addEventListener('click', openShareSheet);
+
+  el.shareClose.addEventListener('click', closeShareSheet);
+  el.shareDismiss.addEventListener('click', closeShareSheet);
+  el.shareOverlay.addEventListener('click', (e) => { if (e.target === el.shareOverlay) closeShareSheet(); });
+  el.shareStart.addEventListener('click', joinRoom);
+  el.shareCopy.addEventListener('click', copyInvite);
+  el.shareLeave.addEventListener('click', leaveRoom);
+  el.nickInput.addEventListener('input', () => {
+    const v = (el.nickInput.value || '').trim().slice(0, 16);
+    social.name = v;
+    saveSocial();
+    updateCertCount();
+    if (!el.certOverlay.hidden && certCur) fillCert(certCur);
+    socialPush(700);
+  });
+
+  el.hallClose.addEventListener('click', () => { el.hallOverlay.hidden = true; });
+  el.hallOverlay.addEventListener('click', (e) => { if (e.target === el.hallOverlay) el.hallOverlay.hidden = true; });
+  el.hallTabHall.addEventListener('click', () => setHallPane('hall'));
+  el.hallTabCert.addEventListener('click', () => setHallPane('cert'));
+  el.certPreview.addEventListener('click', () => openCert({
+    id: 'preview', kind: 'book', code: 'gen', name: '창세기', chapters: 50, date: TODAY, preview: true,
+  }));
+
+  el.certClose.addEventListener('click', closeCert);
+  el.certOverlay.addEventListener('click', (e) => { if (e.target === el.certOverlay) closeCert(); });
+  el.certPng.addEventListener('click', downloadCert);
+  el.certPrint.addEventListener('click', printCert);
+
+  el.rankList.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-clap]');
+    if (!btn) return;
+    sendClap(btn.dataset.clap);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!el.certOverlay.hidden) { closeCert(); return; }
+    if (!el.hallOverlay.hidden) { el.hallOverlay.hidden = true; return; }
+    if (!el.shareOverlay.hidden) { closeShareSheet(); return; }
+  });
+
+  let rsT = 0;
+  window.addEventListener('resize', () => {
+    clearTimeout(rsT);
+    rsT = setTimeout(renderSocial, 180);
+  });
+  window.addEventListener('online', () => { if (social.room) connectRoom(); });
+  window.addEventListener('offline', () => { if (social.room) setSocialMode('offline'); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || !social.room) return;
+    if (social.mode === 'offline' || social.mode === 'error') connectRoom();
+  });
+}
+
+function initSocial() {
+  syncCerts();
+  renderSocial();
+  renderRank();
+  renderCerts();
+  updateCertCount();
+  if (social.room) connectRoom();
+  if (social.invited && !social.name) {
+    setTimeout(() => {
+      openShareSheet();
+      toast('함께 쓰는 방에 들어왔어요 · 이름을 정해 주세요 🌸', 3600);
+      try { el.nickInput.focus(); } catch (e) { /* 무시 */ }
+    }, 700);
+  }
+}
+
 /* ───────── 이어서 치기 ───────── */
 function refreshContinue() {
   const last = state.last;
@@ -841,6 +1928,7 @@ function importJSON(file) {
       s.books = incoming.books || {};
       s.days = incoming.days || {};
       s.stamps = Array.isArray(incoming.stamps) ? incoming.stamps : [];
+      s.certs = Array.isArray(incoming.certs) ? incoming.certs : [];
       s.last = Object.assign({ code: 'gen', ch: 1, vi: 0 }, incoming.last || {});
       s.settings = Object.assign({ fs: 'md' }, incoming.settings || {});
       state = s;
@@ -1000,6 +2088,8 @@ async function init() {
   loadState();
   applySettings();
   bind();
+  loadSocial();
+  bindSocial();
 
   // 달력은 이번 달
   calCursor = new Date();
@@ -1039,6 +2129,8 @@ async function init() {
   await loadChapter(startCode, startCh, startVi);
   refreshProgressUI();
   refreshContinue();
+  await ensureTodayChars();
+  initSocial();
 
   // 이어서 치기 안내
   const t = computeTotals();

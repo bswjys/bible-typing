@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>솔까 김안숙 권사 전용 성경 타이핑</title>
-<meta name="description" content="장모님을 위한 성경 필사 타자 연습 — 개역개정 66권 1,189장, 한 절씩 따라 치고 꽃 도장을 모아요.">
+<meta name="description" content="장모님을 위한 성경 필사 타자 연습 — 개역개정 66권 1,189장, 한 절씩 따라 치고 꽃 도장을 모아요. 함께 쓰면 오늘의 등수와 완필 상장이 찾아옵니다.">
 <meta name="theme-color" content="#FBF5E9">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -14,7 +14,7 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="styles.css?v=2">
+<link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
 
@@ -25,7 +25,10 @@
     <div class="brand">
       <span class="brand-flower">🌸</span>
       <span class="brand-text">
-        <b>솔까 김안숙 권사 전용 성경 타이핑</b>
+        <span class="brand-line">
+          <b>솔까 김안숙 권사 전용 성경 타이핑</b>
+          <span class="brand-badge" id="brandBadge" hidden>· 함께 쓰는 중</span>
+        </span>
         <i>개역개정 · 66권 1,189장</i>
       </span>
     </div>
@@ -36,6 +39,20 @@
         <button class="fs-btn is-on" data-fs="md" type="button">크게</button>
         <button class="fs-btn" data-fs="lg" type="button">아주 크게</button>
       </div>
+
+      <button class="ghost-btn share-btn" id="shareBtn" type="button" data-mode="local"
+              aria-label="함께 쓰기 설정 열기">
+        <span class="share-flower" id="shareFlower" aria-hidden="true">🌸</span>
+        <span class="share-dot" id="shareDot" aria-hidden="true"></span>
+        <span class="share-label" id="shareLabel">함께 쓰기 켜기</span>
+        <span class="share-code" id="shareCode" hidden></span>
+      </button>
+      <button class="ghost-btn icon-ghost" id="copyInvite" type="button" hidden
+              aria-label="초대 링크 복사" title="초대 링크 복사">🔗</button>
+
+      <button class="ghost-btn hall-btn" id="openHall" type="button">
+        <span class="hall-btn-icon" aria-hidden="true">🏆</span><span class="hall-btn-text">명예의 전당</span>
+      </button>
       <button class="ghost-btn picker-open" id="openPicker" type="button">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <span>성경 고르기</span>
@@ -118,8 +135,20 @@
     <div class="verse-chips" id="verseChips" aria-label="이 장의 절"></div>
   </main>
 
-  <!-- ─────────── 오늘의 도장 ─────────── -->
-  <aside class="rail" aria-label="오늘의 도장">
+  <!-- ─────────── 오늘의 등수 · 오늘의 도장 ─────────── -->
+  <aside class="rail" aria-label="오늘의 등수와 도장">
+    <div class="card rank-card" id="rankCard">
+      <div class="rank-head">
+        <div class="card-title"><span class="dot rank-dot"></span>오늘의 타자 등수 <i class="rank-top">TOP 5</i></div>
+        <span class="rank-people" id="rankPeople" hidden></span>
+      </div>
+      <ol class="rank-list" id="rankList"></ol>
+      <p class="rank-empty" id="rankEmpty">함께 쓰기를 켜면 가족·친구와 오늘의 등수를 겨뤄요 🌸</p>
+      <p class="rank-me" id="rankMe" hidden></p>
+      <button class="rank-invite" id="rankInvite" type="button">🌸 함께 쓰기 켜기</button>
+      <button class="rank-hall" id="rankHall" type="button">🏆 명예의 전당 · 내 상장함 <span aria-hidden="true">→</span></button>
+    </div>
+
     <div class="card today-card">
       <div class="card-title"><span class="dot"></span>오늘 딴 꽃 도장</div>
       <div class="today-stamps" id="todayStamps"></div>
@@ -165,6 +194,97 @@
   </div>
 </div>
 
+<!-- ─────────── 함께 쓰기 설정 ─────────── -->
+<div class="overlay" id="shareOverlay" hidden>
+  <div class="sheet share-sheet" role="dialog" aria-modal="true" aria-labelledby="shareTitle">
+    <div class="sheet-head">
+      <h2 id="shareTitle">🌸 함께 쓰기</h2>
+      <button class="icon-btn" id="shareClose" type="button" aria-label="닫기">✕</button>
+    </div>
+
+    <div class="share-body">
+      <p class="share-lead">가족·친구와 같은 방에서 함께 치면 <b>오늘의 등수</b>가 보이고, 한 권을 마치면 <b>완필 상장</b>이 찾아와요.</p>
+
+      <label class="field">
+        <span>내 이름</span>
+        <input id="nickInput" type="text" maxlength="16" autocomplete="off" placeholder="이름 (예: 김안숙 권사)">
+      </label>
+
+      <label class="field">
+        <span>방 코드</span>
+        <input id="roomInput" type="text" maxlength="12" autocomplete="off" spellcheck="false" placeholder="예: 안숙가족">
+      </label>
+
+      <p class="share-note">방 코드를 아는 사람만 함께 볼 수 있어요. 초대 링크를 보내면 코드 입력 없이 바로 들어와요.</p>
+
+      <div class="share-status" id="shareStatus" data-mode="local">가족공유 꺼짐 · 이 기기에만 저장돼요</div>
+
+      <div class="share-actions">
+        <button class="ctrl-btn ctrl-next" id="shareStart" type="button">함께 쓰기 켜기</button>
+        <button class="ctrl-btn" id="shareCopy" type="button">초대 링크 복사</button>
+        <button class="ctrl-btn" id="shareLeave" type="button" hidden>함께 쓰기 끄기</button>
+        <button class="ctrl-btn ghost" id="shareDismiss" type="button">닫기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────── 명예의 전당 · 내 상장함 ─────────── -->
+<div class="overlay sheet-overlay" id="hallOverlay" hidden>
+  <div class="sheet hall-sheet" role="dialog" aria-modal="true" aria-labelledby="hallTitle">
+    <div class="sheet-head">
+      <h2 id="hallTitle">🏆 명예의 전당</h2>
+      <button class="icon-btn" id="hallClose" type="button" aria-label="닫기">✕</button>
+    </div>
+
+    <div class="hall-tabs" role="tablist">
+      <button class="hall-tab is-on" id="hallTabHall" data-pane="hall" type="button" role="tab">명예의 전당</button>
+      <button class="hall-tab" id="hallTabCert" data-pane="cert" type="button" role="tab">내 상장함 <i id="certCount">0</i></button>
+    </div>
+
+    <div class="hall-body" id="hallPaneHall"></div>
+
+    <div class="hall-body" id="hallPaneCert" hidden>
+      <div class="cert-grid" id="certGrid"></div>
+      <p class="hall-empty" id="certEmpty">아직 받은 상장이 없어요.<br>성경 한 권을 다 치면 금빛 완필 상장이 찾아와요 📜</p>
+      <div class="cert-preview-row">
+        <button class="ctrl-btn" id="certPreview" type="button">📜 상장 미리보기 (시연용)</button>
+        <span class="cert-preview-note">어떤 상장인지 먼저 보실 수 있어요</span>
+      </div>
+    </div>
+
+    <p class="sheet-note" id="hallNote">함께 쓰기를 켜면 가족·친구의 완필 기록도 이곳에 모여요.</p>
+  </div>
+</div>
+
+<!-- ─────────── 완필 상장 ─────────── -->
+<div class="overlay cert-overlay" id="certOverlay" hidden>
+  <div class="cert-wrap" role="dialog" aria-modal="true" aria-labelledby="certTitle">
+    <div class="cert" id="certCard">
+      <span class="cert-corner tl" aria-hidden="true">❧</span>
+      <span class="cert-corner tr" aria-hidden="true">❧</span>
+      <span class="cert-corner bl" aria-hidden="true">❧</span>
+      <span class="cert-corner br" aria-hidden="true">❧</span>
+      <div class="cert-inner">
+        <div class="cert-kicker" id="certKicker">성경 타자 · 완필 상장</div>
+        <div class="cert-flower" aria-hidden="true">🌸</div>
+        <h2 class="cert-title" id="certTitle">완 필 상 장</h2>
+        <div class="cert-rule" aria-hidden="true"><span></span>✿<span></span></div>
+        <div class="cert-name" id="certName">김안숙 권사</div>
+        <p class="cert-body" id="certBody">창세기 전 50장을 정성으로 완필하셨습니다.</p>
+        <div class="cert-date" id="certDate">2026년 11월 25일</div>
+        <div class="cert-seal" aria-hidden="true"><b>완필</b><i>성경타자</i></div>
+      </div>
+    </div>
+
+    <div class="cert-actions">
+      <button class="ctrl-btn ctrl-next" id="certPng" type="button">PNG 이미지로 저장</button>
+      <button class="ctrl-btn" id="certPrint" type="button">인쇄하기</button>
+      <button class="ctrl-btn ghost" id="certClose" type="button">닫기</button>
+    </div>
+  </div>
+</div>
+
 <!-- ─────────── 도장판 ─────────── -->
 <div class="overlay sheet-overlay" id="boardOverlay" hidden>
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="boardTitle">
@@ -195,9 +315,9 @@
 <div class="toast" id="toast" hidden></div>
 
 <footer class="foot">
-  <p>대한성서공회 <b>개역개정</b> 본문 · 기록은 이 브라우저에만 저장됩니다</p>
+  <p>대한성서공회 <b>개역개정</b> 본문 · 기록은 이 브라우저에 저장되고, 함께 쓰기를 켜면 가족 방에 모여요</p>
 </footer>
 
-<script src="app.js?v=2"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>
