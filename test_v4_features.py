@@ -314,6 +314,7 @@ try:
         st = state_of(pg)
         ids = [x.get('id') for x in (st.get('certs') or [])]
         check('저장: 이달의 성경 상장', f'month-{ym}-2jn' in ids, ids)
+        pg.wait_for_timeout(700)
         pg.screenshot(path=os.path.join(SHOTS, '33_v4_월간상장_1280.png'))
 
         with pg.expect_download(timeout=20000) as dl_info:

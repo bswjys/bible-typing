@@ -154,6 +154,64 @@ with sync_playwright() as p:
     names = {v.get('name') for v in (room.get('members') or {}).values() if isinstance(v, dict)}
     check('라이브 Firebase 저장 (두 사람)', names == {'김안숙 권사', '사위 백승우'}, names)
 
+    # 라이브 v4: 이달의 성경 진행률 · 월간 완필 상장 (시드로 빠르게 확인)
+    SEED_HEAD = """(() => {
+        const d = new Date(), p = (n) => String(n).padStart(2, '0');
+        const today = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+        const ym = today.slice(0, 7);
+        %s
+        localStorage.setItem('bible-typing-v1', JSON.stringify(state));
+    })();"""
+
+    cs = browser.new_context(viewport={'width': 1280, 'height': 800}, accept_downloads=True)
+    cs.add_init_script(SEED_HEAD % """
+        const mat = {};
+        for (let ch = 1; ch <= 28; ch++) mat[ch] = { v: {}, done: ch <= 12, ts: ch <= 12 ? Date.now() : 0 };
+        const state = { v: 1, books: { mat }, days: { [today]: { v: 12, c: 12, ch: 600 } },
+            stamps: [], certs: [], monthly: { [ym]: 'mat' }, posts: [],
+            last: { code: 'mat', ch: 13, vi: 0 }, settings: { fs: 'md' } };
+    """)
+    ps = cs.new_page()
+    attach(ps)
+    ps.goto(URL, wait_until='networkidle')
+    ps.wait_for_timeout(1200)
+    goal_txt = ps.inner_text('#goalMain').replace('\n', ' / ')
+    check('라이브 이달의 성경 진행률 (마태복음 12 / 28장)', '마태복음' in goal_txt and '12 / 28장' in goal_txt,
+          goal_txt)
+    check('라이브 이달의 성경 진행 막대', ps.locator('#goalCard .goal-bar span').count() == 1)
+    ps.screenshot(path=os.path.join(SHOTS, 'live_v4_monthly_goal_1280.png'))
+    cs.close()
+
+    cs2 = browser.new_context(viewport={'width': 1280, 'height': 800}, accept_downloads=True)
+    cs2.add_init_script(SEED_HEAD % """
+        const v = {}; for (let i = 0; i < 12; i++) v[i] = Date.now();
+        const state = { v: 1, books: { '2jn': { '1': { v, done: false, ts: 0 } } },
+            days: { [today]: { v: 12, c: 0, ch: 100 } }, stamps: [], certs: [],
+            monthly: { [ym]: '2jn' }, posts: [],
+            last: { code: '2jn', ch: 1, vi: 12 }, settings: { fs: 'md' } };
+    """)
+    ps2 = cs2.new_page()
+    attach(ps2)
+    ps2.goto(URL, wait_until='networkidle')
+    ps2.wait_for_timeout(1000)
+    t = ps2.inner_text('#verseText')
+    ps2.fill('#typeInput', letters(t))
+    ps2.wait_for_timeout(1300)
+    try:
+        ps2.wait_for_function("() => !document.querySelector('#certOverlay').hidden", timeout=10000)
+        check('라이브 이달의 성경 완필 상장 자동 발급',
+              '이 달 의 성 경 상 장' in ps2.inner_text('#certTitle'), ps2.inner_text('#certTitle'))
+        check('라이브 월간 상장 문구', '이달의 성경 [요한이서] 전 1장을' in ps2.inner_text('#certBody').replace('\n', ' '),
+              ps2.inner_text('#certBody'))
+        ps2.wait_for_timeout(900)   # 상장 카드 애니메이션이 끝난 뒤 촬영
+        ps2.screenshot(path=os.path.join(SHOTS, 'live_v4_month_cert_1280.png'))
+        with ps2.expect_download(timeout=25000) as d2:
+            ps2.click('#certPng')
+        check('라이브 월간 상장 PNG 저장', os.path.getsize(d2.value.path()) > 40000)
+    except Exception as e:
+        check('라이브 이달의 성경 완필 상장 자동 발급', False, e)
+    cs2.close()
+
     check('라이브 콘솔 오류 0건', len(errs) == 0, errs[:5])
     browser.close()
 
