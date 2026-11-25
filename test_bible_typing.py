@@ -179,9 +179,9 @@ with sync_playwright() as p:
     check('상단 머리글 제목 = ' + APP_TITLE, brand == APP_TITLE, brand)
     html = page.evaluate("async () => (await fetch('index.html', {cache: 'no-store'})).text()")
     check('index.html <title> 교체', f'<title>{APP_TITLE}</title>' in html)
-    check('index.html 캐시 버전 쿼리 (?v=3)', 'styles.css?v=3' in html and 'app.js?v=3' in html)
+    check('index.html 캐시 버전 쿼리 (?v=4)', 'styles.css?v=4' in html and 'app.js?v=4' in html)
     sw = page.evaluate("async () => (await fetch('sw.js', {cache: 'no-store'})).text()")
-    check('sw.js 캐시 버전 갱신', 'bible-typing-v3' in sw, sw[:60])
+    check('sw.js 캐시 버전 갱신', 'bible-typing-v4' in sw, sw[:60])
     overflow = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
     check('1280px 가로 넘침 없음', overflow <= 0, overflow)
     for sel in ['#picker', '#verseCard', '#typeInput', '#bookGrid', '.rail', '#verseChips']:

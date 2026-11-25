@@ -146,6 +146,36 @@ const el = {
   btnReset: $('#btnReset'),
   toast: $('#toast'),
   fsBtns: Array.from(document.querySelectorAll('.fs-btn')),
+
+  // 이달의 성경
+  goalCard: $('#goalCard'),
+  goalMonth: $('#goalMonth'),
+  goalMain: $('#goalMain'),
+  goalSelect: $('#goalSelect'),
+  goalSave: $('#goalSave'),
+  goalNote: $('#goalNote'),
+
+  // 출석 꽃밭 · 칭호
+  attCard: $('#attCard'),
+  attMonth: $('#attMonth'),
+  attToday: $('#attToday'),
+  attStreak: $('#attStreak'),
+  attGarden: $('#attGarden'),
+  myTitle: $('#myTitle'),
+  attNext: $('#attNext'),
+
+  // 축하 소식
+  openNews: $('#openNews'),
+  openNews2: $('#openNews2'),
+  newsBadge: $('#newsBadge'),
+  newsCardBadge: $('#newsCardBadge'),
+  newsPreview: $('#newsPreview'),
+  newsOverlay: $('#newsOverlay'),
+  newsClose: $('#newsClose'),
+  newsInput: $('#newsInput'),
+  newsSend: $('#newsSend'),
+  newsList: $('#newsList'),
+  newsNote: $('#newsNote'),
 };
 
 /* ───────── 상태 ───────── */
@@ -172,7 +202,9 @@ function defaultState() {
     books: {},          // code -> { ch: { v:{verseIdx:ts}, done:bool, ts } }
     days: {},           // 'YYYY-MM-DD' -> { v: n, c: n }
     stamps: [],         // [{ id, d:'YYYY-MM-DD', code, ch, t }]
-    certs: [],          // 완필 상장 [{ id, kind:'book'|'all', code, name, chapters, date, ts }]
+    certs: [],          // 완필 상장 [{ id, kind:'book'|'all'|'month', code, name, chapters, date, ts }]
+    monthly: {},        // 'YYYY-MM' -> 권 코드 (이달의 성경)
+    posts: [],          // 축하 소식 [{ id, kind, name, memberId, text, code, ym, ts, replies }]
     last: { code: 'gen', ch: 1, vi: 0 },
     settings: { fs: 'md' },
   };
@@ -189,6 +221,8 @@ function loadState() {
       state.days = parsed.days || {};
       state.stamps = Array.isArray(parsed.stamps) ? parsed.stamps : [];
       state.certs = Array.isArray(parsed.certs) ? parsed.certs : [];
+      state.monthly = (parsed.monthly && typeof parsed.monthly === 'object') ? parsed.monthly : {};
+      state.posts = Array.isArray(parsed.posts) ? parsed.posts : [];
       state.settings = Object.assign({ fs: 'md' }, parsed.settings || {});
       state.last = Object.assign({ code: 'gen', ch: 1, vi: 0 }, parsed.last || {});
       return;
@@ -578,6 +612,15 @@ function markVerseDone(vi) {
   // 오늘 완료한 글자 수 (띄어쓰기·문장부호 제외) — 오늘의 등수 동률 기준
   d.ch = (Number(d.ch) || 0) + (verse ? verse.req.length : 0);
 
+  // 오늘 첫 절 → 자동 출석 · 연속 출석 마일스톤 축하 글
+  if (Number(d.v) === 1) {
+    const streak = currentStreak();
+    renderAttendance();
+    toast(`✅ 오늘 출석 완료 · 🔥 ${streak}일 연속`, 3400);
+    burst(window.innerWidth / 2, 130, 8, 140);
+    if (STREAK_MILESTONES.includes(streak)) postStreak(streak);
+  }
+
   // 다음에 칠 자리를 '이어서 치기' 위치로 저장
   const book = BOOKS[cur.code];
   const total = book.chapters[cur.ch - 1].length;
@@ -672,9 +715,16 @@ function finishChapter() {
   refreshProgressUI();
   refreshContinue();
   const newCerts = syncCerts();
+  const bookCert = newCerts.find((c) => c.kind === 'book');
+  const monthCert = newCerts.find((c) => c.kind === 'month');
+  if (bookCert) postBook(bookCert.code);
+  if (monthCert) postMonth(monthCert.ym, monthCert.code);
+  if (monthCert) setTimeout(() => celebrateMonth(monthCert), 500);
+  renderAttendance();
+  renderMonthly();
   showChapterOverlay(first, verses.length);
   if (newCerts.length) {
-    const pick = newCerts[newCerts.length - 1];
+    const pick = monthCert || newCerts[newCerts.length - 1];
     setTimeout(() => {
       if (el.certOverlay.hidden) openCert(pick);
     }, 1150);
@@ -751,10 +801,14 @@ function refreshProgressUI() {
   }
 
   renderCalendar();
+  renderAttendance();
+  renderMonthly();
   if (!el.boardOverlay.hidden) renderBoard();
   renderChapterInfo();
   updateBookDots();
   renderRank();
+  renderNewsPreview();
+  updateNewsBadge();
   socialPush();
   updateCertCount();
 }
@@ -798,7 +852,10 @@ function renderCalendar() {
     s.className = 'day';
     s.textContent = d;
     if (state.days[key] && state.days[key].v > 0) s.classList.add('has');
-    if (key === TODAY) s.classList.add('today');
+    if (key === TODAY) {
+      s.classList.add('today');
+      if (state.days[key] && state.days[key].v > 0) s.classList.add('att');
+    }
     s.title = state.days[key] ? `${state.days[key].v}절 · ${state.days[key].c}장` : '';
     el.calGrid.appendChild(s);
   }
@@ -869,6 +926,8 @@ const social = {
   clapSeen: null,
   wasFirst: null,
   invited: false,
+  newsBase: null,
+  newsSeen: null,
 };
 let certCur = null;
 
@@ -899,6 +958,10 @@ const roomUrl = (suffix = '') =>
 const memberUrl = (id) => `${roomUrl('/members')}/${encodeURIComponent(id)}.json`;
 const clapNodeUrl = (target, key) =>
   `${roomUrl('/claps')}/${encodeURIComponent(target)}/${encodeURIComponent(key)}.json`;
+const goalNodeUrl = (ym) => `${roomUrl('/monthlyGoal')}/${encodeURIComponent(ym)}.json`;
+const postNodeUrl = (id) => `${roomUrl('/posts')}/${encodeURIComponent(id)}.json`;
+const replyNodeUrl = (postId, rid) =>
+  `${roomUrl('/posts')}/${encodeURIComponent(postId)}/replies/${encodeURIComponent(rid)}.json`;
 
 function fbRequest(method, url, body) {
   const opts = { method, cache: 'no-store' };
@@ -945,6 +1008,8 @@ function mySnapshot() {
     books,
     oneRead: t.chapters >= 1189,
     stamps: t.stamps,
+    streak: currentStreak(),
+    attendedToday: attendedToday(),
     updatedAt: Date.now(),
   };
 }
@@ -963,6 +1028,8 @@ function mergeSnap(mine, remote) {
     todayVerses: sameDay ? Math.max(mine.todayVerses, Number(remote.todayVerses) || 0) : mine.todayVerses,
     todayChars: sameDay ? Math.max(mine.todayChars, Number(remote.todayChars) || 0) : mine.todayChars,
     stamps: Math.max(mine.stamps, Number(remote.stamps) || 0),
+    streak: Math.max(mine.streak || 0, Number(remote.streak) || 0),
+    attendedToday: mine.attendedToday || !!remote.attendedToday,
   });
 }
 
@@ -980,6 +1047,9 @@ function rowOf(id, m, claps, isMe) {
     bookCount: Number(m.bookCount) || 0,
     books: (m.books && typeof m.books === 'object') ? m.books : {},
     oneRead: !!m.oneRead,
+    streak: Number(m.streak) || 0,
+    attendedToday: !!m.attendedToday,
+    title: titleFor(Number(m.totalVerses) || 0),
     claps: countClaps(claps[id]),
   };
 }
@@ -1030,9 +1100,17 @@ function rankRowEl(r) {
   p.setAttribute('aria-label', petal.tag || `${r.rank}위`);
   li.appendChild(p);
   const name = mk('span', 'rank-name');
-  name.appendChild(mk('b', '', r.name));
-  if (r.isMe) name.appendChild(mk('span', 'me-tag', '나'));
-  if (petal.tag) name.appendChild(mk('em', 'rank-tag ' + petal.cls, petal.tag));
+  const who = mk('span', 'rank-who');
+  who.appendChild(mk('b', '', r.name));
+  if (r.isMe) who.appendChild(mk('span', 'me-tag', '나'));
+  if (petal.tag) who.appendChild(mk('em', 'rank-tag ' + petal.cls, petal.tag));
+  name.appendChild(who);
+  const metaLine = mk('span', 'rank-meta');
+  metaLine.appendChild(mk('em', 'title-badge ' + titleTier(r.totalVerses).cls, r.title));
+  if (r.streak > 0) {
+    metaLine.appendChild(mk('span', 'rank-streak' + (r.streak >= 3 ? ' is-hot' : ''), `🔥 ${r.streak}일`));
+  }
+  name.appendChild(metaLine);
   li.appendChild(name);
   const score = mk('span', 'rank-score');
   score.appendChild(mk('b', '', r.todayVerses.toLocaleString('ko-KR')));
@@ -1265,36 +1343,47 @@ function leaveRoom() {
   social.joined = false;
   social.clapSeen = null;
   social.wasFirst = null;
+  social.newsBase = null;
+  social.newsSeen = {};
   saveSocial();
   renderSocial();
   renderRank();
   renderHall();
+  renderMonthly();
+  renderNews(true);
+  updateNewsBadge();
   toast(`함께 쓰기를 껐어요 · 방 ${room} · 기록은 이 기기에 그대로 있어요`);
 }
 
 function connectRoom() {
   closeStream();
   stopPolling();
-  social.mirror = { members: {}, claps: {} };
+  social.mirror = { members: {}, claps: {}, posts: {}, monthlyGoal: {} };
   social.joined = false;
   social.clapSeen = null;
   social.wasFirst = null;
   social.restarts = 0;
   social.fails = 0;
+  social.newsBase = null;
+  social.newsSeen = {};
   social.mode = social.room ? 'connecting' : 'local';
   renderSocial();
   renderRank();
   renderHall();
-  if (!social.room) return;
+  renderMonthly();
+  if (!social.room) { renderNews(true); updateNewsBadge(); return; }
   if (navigator.onLine === false) { setSocialMode('offline'); return; }
   openStream();
   socialPush(0);
+  flushLocalPosts();
 }
 
 function normalizeRoom(data) {
   const room = (data && typeof data === 'object') ? data : {};
   if (!room.members || typeof room.members !== 'object') room.members = {};
   if (!room.claps || typeof room.claps !== 'object') room.claps = {};
+  if (!room.monthlyGoal || typeof room.monthlyGoal !== 'object') room.monthlyGoal = {};
+  if (!room.posts || typeof room.posts !== 'object') room.posts = {};
   return room;
 }
 
@@ -1431,6 +1520,10 @@ function afterRoomUpdate() {
   renderRank();
   renderHall();
   renderSocial();
+  renderMonthly();
+  renderNews();
+  detectNews();
+  updateNewsBadge();
 }
 
 function socialPush(delay = 350) {
@@ -1479,6 +1572,7 @@ function renderHall() {
     const main = mk('div', 'hall-main');
     const nameLine = mk('div', 'hall-name');
     nameLine.appendChild(mk('b', '', r.name));
+    nameLine.appendChild(mk('em', 'title-badge ' + titleTier(r.totalVerses).cls, r.title));
     if (r.isMe) nameLine.appendChild(mk('span', 'hall-flag me', '나'));
     if (r.oneRead) nameLine.appendChild(mk('span', 'hall-flag read', '📖 1독 달성'));
     main.appendChild(nameLine);
@@ -1501,7 +1595,9 @@ function renderHall() {
     row.appendChild(main);
 
     const side = mk('div', 'hall-side');
-    side.innerHTML = `<span class="hall-claps">👏 ${r.claps}</span><span class="hall-sub">오늘 ${r.todayVerses.toLocaleString('ko-KR')}절</span>`;
+    side.innerHTML = `<span class="hall-claps">👏 ${r.claps}</span>`
+      + (r.streak > 0 ? `<span class="hall-streak">🔥 ${r.streak}일 연속</span>` : '')
+      + `<span class="hall-sub">오늘 ${r.todayVerses.toLocaleString('ko-KR')}절</span>`;
     row.appendChild(side);
     el.hallPaneHall.appendChild(row);
   });
@@ -1525,9 +1621,12 @@ function renderCerts() {
     const btn = mk('button', 'cert-card');
     btn.type = 'button';
     btn.dataset.cert = c.id;
-    btn.appendChild(mk('span', 'cc-flower', c.kind === 'all' ? '🏆' : '📜'));
-    btn.appendChild(mk('span', 'cc-name', c.kind === 'all' ? '성경 1독 완필' : `${c.name} 완필`));
-    btn.appendChild(mk('span', 'cc-meta', c.kind === 'all' ? `전 1,189장 · ${dateKo(c.date)}` : `전 ${c.chapters}${unitOf(c.code || '')} · ${dateKo(c.date)}`));
+    const isMonth = c.kind === 'month';
+    btn.appendChild(mk('span', 'cc-flower', c.kind === 'all' ? '🏆' : (isMonth ? '📅' : '📜')));
+    btn.appendChild(mk('span', 'cc-name', c.kind === 'all' ? '성경 1독 완필' : (isMonth ? `이달의 성경 · ${c.name}` : `${c.name} 완필`)));
+    btn.appendChild(mk('span', 'cc-meta', c.kind === 'all'
+      ? `전 1,189장 · ${dateKo(c.date)}`
+      : (isMonth ? `${ymKo(c.ym)} · 전 ${c.chapters}${unitOf(c.code || '')}` : `전 ${c.chapters}${unitOf(c.code || '')} · ${dateKo(c.date)}`)));
     btn.appendChild(mk('span', 'cc-open', '상장 열기 →'));
     btn.addEventListener('click', () => openCert(c));
     el.certGrid.appendChild(btn);
@@ -1571,6 +1670,25 @@ function syncCerts() {
     have.add(id);
     added.push(cert);
   });
+  // 이달의 성경: 이번 달에 그 권의 모든 장을 마쳤으면 월간 완필 상장
+  const goal = goalCode();
+  if (goal) {
+    const meta = bookByCode[goal];
+    const ym = monthKeyNow();
+    if (meta && monthlyProgress(goal, ym) >= meta.chapters) {
+      const id = `month-${ym}-${goal}`;
+      if (!have.has(id)) {
+        const cert = {
+          id, kind: 'month', code: goal, name: meta.name, short: meta.short,
+          chapters: meta.chapters, ym, date: TODAY, ts: Date.now(),
+        };
+        state.certs.push(cert);
+        have.add(id);
+        added.push(cert);
+      }
+    }
+  }
+
   const total = computeTotals().chapters;
   if (total >= 1189 && !have.has('all-read')) {
     const cert = { id: 'all-read', kind: 'all', name: '성경', chapters: 1189, date: TODAY, ts: Date.now() };
@@ -1584,12 +1702,15 @@ function syncCerts() {
 
 function fillCert(cert) {
   const isAll = cert.kind === 'all';
-  el.certKicker.textContent = '성경 타자 · 완필 상장';
-  el.certTitle.textContent = isAll ? '성 경 1 독 상 장' : '완 필 상 장';
+  const isMonth = cert.kind === 'month';
+  el.certKicker.textContent = isMonth ? '성경 타자 · 이달의 성경' : '성경 타자 · 완필 상장';
+  el.certTitle.textContent = isAll ? '성 경 1 독 상 장' : (isMonth ? '이 달 의 성 경 상 장' : '완 필 상 장');
   el.certName.textContent = nameOf();
   el.certBody.innerHTML = isAll
     ? '성경 전 <b>1,189장</b>을 모두 완필하시어<br>1독을 이루셨습니다.'
-    : `${cert.name} 전 <b>${cert.chapters}${unitOf(cert.code || '')}</b>을 정성으로 완필하셨습니다.`;
+    : isMonth
+      ? `${ymKo(cert.ym)} 이달의 성경 [<b>${cert.name}</b>] 전 <b>${cert.chapters}${unitOf(cert.code || '')}</b>을<br>정성으로 완필하셨습니다.`
+      : `${cert.name} 전 <b>${cert.chapters}${unitOf(cert.code || '')}</b>을 정성으로 완필하셨습니다.`;
   el.certDate.textContent = dateKo(cert.date);
 }
 
@@ -1611,6 +1732,7 @@ function certCanvas(cert) {
   const SERIF = '"Noto Serif KR","Noto Serif CJK KR","Nanum Myeongjo","Batang","Apple SD Gothic Neo",serif';
   const UI = '"Noto Sans KR","Noto Sans CJK KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif';
   const isAll = cert.kind === 'all';
+  const isMonth = cert.kind === 'month';
   const name = nameOf();
 
   g.fillStyle = '#FFFDF6';
@@ -1628,14 +1750,15 @@ function certCanvas(cert) {
   g.textAlign = 'center';
   g.fillStyle = '#A98A34';
   g.font = `800 21px ${UI}`;
-  drawSpaced(g, '성 경 타 자  ·  완 필  상 장', W / 2, 172, 6);
+  drawSpaced(g, isMonth ? '성 경 타 자  ·  이 달 의 성 경' : '성 경 타 자  ·  완 필  상 장', W / 2, 172, 6);
 
   g.font = '52px serif';
   g.fillText('🌸', W / 2, 246);
 
   g.fillStyle = '#6B4B1C';
   g.font = `800 100px ${SERIF}`;
-  drawSpaced(g, isAll ? '성 경 1 독 상 장' : '완 필 상 장', W / 2, 372, isAll ? 8 : 18);
+  drawSpaced(g, isAll ? '성 경 1 독 상 장' : (isMonth ? '이 달 의 성 경 상 장' : '완 필 상 장'),
+             W / 2, 372, isAll ? 8 : (isMonth ? 10 : 18));
 
   g.strokeStyle = '#C9A227'; g.lineWidth = 1.5;
   g.beginPath(); g.moveTo(W * 0.26, 420); g.lineTo(W * 0.44, 420); g.stroke();
@@ -1653,6 +1776,11 @@ function certCanvas(cert) {
     g.font = `600 34px ${SERIF}`;
     g.fillStyle = '#5A4630';
     g.fillText('1독을 이루셨습니다.', W / 2, 684);
+  } else if (isMonth) {
+    drawRich(g, `${ymKo(cert.ym)} 이달의 성경 [`, cert.name, ']', W / 2, 626, 34, SERIF);
+    g.fillStyle = '#5A4630';
+    g.font = `600 34px ${SERIF}`;
+    drawRich(g, '전 ', `${cert.chapters}${unitOf(cert.code || '')}`, '을 정성으로 완필하셨습니다.', W / 2, 684, 34, SERIF);
   } else {
     drawRich(g, `${cert.name} 전 `, `${cert.chapters}${unitOf(cert.code || '')}`, '을 정성으로', W / 2, 626, 34, SERIF);
     g.fillStyle = '#5A4630';
@@ -1733,7 +1861,9 @@ function downloadCert() {
   let cv;
   try { cv = certCanvas(cert); }
   catch (e) { console.warn(e); toast('상장 이미지를 만들지 못했어요'); return; }
-  const fname = `완필상장-${cert.kind === 'all' ? '성경1독' : cert.name}.png`;
+  const fname = cert.kind === 'all'
+    ? '완필상장-성경1독.png'
+    : (cert.kind === 'month' ? `이달의상장-${cert.ym}-${cert.name}.png` : `완필상장-${cert.name}.png`);
   const save = (blob) => {
     if (!blob) { toast('상장 이미지를 만들지 못했어요'); return; }
     const url = URL.createObjectURL(blob);
@@ -1760,6 +1890,544 @@ function printCert() {
   window.addEventListener('afterprint', done);
   try { window.print(); } catch (e) { /* 무시 */ }
   setTimeout(done, 1500);
+}
+
+/* ══════════════════════════════════════════════
+   자동 출석 · 연속 출석 꽃밭 · 칭호
+   ══════════════════════════════════════════════ */
+const monthKeyNow = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+const ymKo = (ym) => {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(ym || ''));
+  return m ? `${m[1]}년 ${Number(m[2])}월` : String(ym || '');
+};
+
+/** 오늘 1절 이상 마쳤는가 (자동 출석) */
+function attendedToday() {
+  const d = state.days && state.days[TODAY];
+  return !!(d && Number(d.v) > 0);
+}
+
+/** 오늘(또는 오늘 출석 전이면 어제)부터 거슬러 올라가는 연속 출석 일수 */
+function currentStreak(fromKey) {
+  const d = new Date();
+  if (fromKey) {
+    const [y, m, dd] = String(fromKey).split('-').map(Number);
+    d.setFullYear(y, m - 1, dd);
+  }
+  const seen = (k) => !!(state.days && state.days[k] && Number(state.days[k].v) > 0);
+  if (!seen(ymd(d))) d.setDate(d.getDate() - 1);   // 오늘 아직 안 쳤으면 어제부터
+  let n = 0;
+  let guard = 0;
+  while (seen(ymd(d)) && guard < 4000) {
+    n += 1;
+    d.setDate(d.getDate() - 1);
+    guard += 1;
+  }
+  return n;
+}
+
+/* 칭호 — 누적 완료 절 수 */
+const TITLE_TIERS = [
+  { min: 1000, label: '👑 은혜의 장인', cls: 't-crown' },
+  { min: 200, label: '✍️ 성경 서기관', cls: 't-scribe' },
+  { min: 30, label: '🌸 말씀 꽃길', cls: 't-flower' },
+  { min: 0, label: '🌱 새싹 타자수', cls: 't-sprout' },
+];
+function titleTier(verses) {
+  const v = Number(verses) || 0;
+  return TITLE_TIERS.find((t) => v >= t.min) || TITLE_TIERS[TITLE_TIERS.length - 1];
+}
+const titleFor = (verses) => titleTier(verses).label;
+
+const STREAK_MILESTONES = [3, 7, 14, 30, 60, 100, 180, 365];
+
+function renderAttendance() {
+  if (!el.attToday) return;
+  const att = attendedToday();
+  const streak = currentStreak();
+  el.attToday.textContent = att ? '✅ 오늘 출석' : '🌱 아직 오늘 출석 전';
+  el.attToday.classList.toggle('is-on', att);
+  el.attStreak.textContent = `🔥 ${streak}일 연속`;
+  el.attStreak.classList.toggle('is-hot', streak >= 3);
+
+  // 최근 14일 꽃밭
+  el.attGarden.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = ymd(d);
+    const has = !!(state.days[key] && Number(state.days[key].v) > 0);
+    const c = document.createElement('span');
+    c.className = 'att-cell' + (has ? ' has' : '') + (i === 0 ? ' today' : '');
+    c.textContent = has ? '🌸' : '·';
+    c.title = `${key} · ${has ? `출석 (${state.days[key].v}절)` : '쉼'}`;
+    frag.appendChild(c);
+  }
+  el.attGarden.appendChild(frag);
+
+  const mKey = monthKeyNow();
+  const monthDays = Object.keys(state.days || {})
+    .filter((k) => k.startsWith(mKey) && Number(state.days[k].v) > 0).length;
+  el.attMonth.textContent = `이번 달 ${monthDays}일`;
+
+  const verses = computeTotals().verses;
+  const tier = titleTier(verses);
+  el.myTitle.textContent = tier.label;
+  el.myTitle.className = tier.cls;
+  const next = TITLE_TIERS.filter((t) => t.min > verses).sort((a, b) => a.min - b.min)[0];
+  if (el.attNext) el.attNext.textContent = next ? `다음 칭호까지 ${(next.min - verses).toLocaleString('ko-KR')}절` : '최고 칭호예요 🎉';
+}
+
+/* ══════════════════════════════════════════════
+   이달의 성경 (YYYY-MM 목표) · 월간 완필 상장
+   ══════════════════════════════════════════════ */
+const MONTH_RECOMMEND = ['mat', 'psa', 'jhn', 'pro', 'rom', 'mrk', 'luk', 'act', 'gen', '1jn', 'php', 'jas'];
+
+function recommendedGoal(ym = monthKeyNow()) {
+  const m = Number(String(ym).slice(5, 7)) - 1;
+  const code = MONTH_RECOMMEND[((m % 12) + 12) % 12];
+  return bookByCode[code] ? code : 'mat';
+}
+
+/** 이번 달(ym)에 마친 그 권의 장 수 */
+function monthlyProgress(code, ym = monthKeyNow()) {
+  const rec = state.books[code];
+  if (!rec) return 0;
+  let n = 0;
+  Object.keys(rec).forEach((ch) => {
+    const r = rec[ch];
+    if (r && r.done && r.ts && ymd(new Date(r.ts)).slice(0, 7) === ym) n += 1;
+  });
+  return n;
+}
+
+/** 지금 함께 보고 있는 이달의 성경 (모임이면 방 값, 아니면 이 기기 값) */
+function goalCode(ym = monthKeyNow()) {
+  if (social.room) {
+    const g = social.mirror && social.mirror.monthlyGoal && social.mirror.monthlyGoal[ym];
+    const code = g && (typeof g === 'string' ? g : g.code);
+    return (code && bookByCode[code]) ? code : '';
+  }
+  const local = state.monthly && state.monthly[ym];
+  return (local && bookByCode[local]) ? local : '';
+}
+
+function renderMonthly() {
+  if (!el.goalMain || !INDEX) return;
+  const ym = monthKeyNow();
+  el.goalMonth.textContent = ymKo(ym);
+
+  if (el.goalSelect && !el.goalSelect.dataset.ready) {
+    el.goalSelect.innerHTML = '';
+    INDEX.books.forEach((b) => {
+      const o = document.createElement('option');
+      o.value = b.code;
+      o.textContent = b.name;
+      el.goalSelect.appendChild(o);
+    });
+    el.goalSelect.dataset.ready = '1';
+  }
+
+  const code = goalCode(ym);
+  if (code) {
+    const meta = bookByCode[code];
+    const unit = unitOf(code);
+    const done = monthlyProgress(code, ym);
+    const total = meta.chapters;
+    const pct = Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+    el.goalMain.innerHTML = `
+      <div class="goal-row">
+        <span class="goal-name">${meta.name} <i>${total}${unit}</i></span>
+        <span class="goal-num"><b>${done}</b> / ${total}${unit}</span>
+      </div>
+      <div class="goal-bar" role="img" aria-label="${meta.name} ${done} / ${total}${unit} 진행"><span style="width:${pct}%"></span></div>
+      ${done >= total ? '<p class="goal-done">🎉 이달의 성경 완필! 상장함에서 확인하세요</p>' : ''}`;
+    el.goalSave.textContent = '바꾸기';
+    if (document.activeElement !== el.goalSelect) el.goalSelect.value = code;
+    el.goalNote.textContent = social.room
+      ? `함께 쓰는 방 ${social.room} 모두가 같은 이달의 성경을 봐요 · 누구나 바꿀 수 있어요`
+      : '이번 달에 이 성경을 다 치면 이달의 성경 완필 상장이 찾아와요 📜';
+  } else {
+    const rec = recommendedGoal(ym);
+    const name = bookByCode[rec] ? bookByCode[rec].name : '마태복음';
+    el.goalMain.innerHTML = `<p class="goal-none">아직 정하지 않았어요<br><span>이달 추천: ${name}</span></p>`;
+    el.goalSave.textContent = '정하기';
+    if (document.activeElement !== el.goalSelect) el.goalSelect.value = rec;
+    el.goalNote.textContent = '이달의 성경을 정하면 진행률이 보이고, 다 치면 상장이 찾아와요 📜';
+  }
+}
+
+function setGoal(code) {
+  if (!bookByCode[code]) { toast('성경을 골라 주세요'); return; }
+  const ym = monthKeyNow();
+  state.monthly = state.monthly || {};
+  state.monthly[ym] = code;
+  saveNow();
+  const payload = { code, by: nameOf(), ts: Date.now() };
+  if (social.room) {
+    if (!social.mirror) social.mirror = { members: {}, claps: {}, posts: {}, monthlyGoal: {} };
+    social.mirror.monthlyGoal = social.mirror.monthlyGoal || {};
+    social.mirror.monthlyGoal[ym] = payload;
+    fbRequest('PUT', goalNodeUrl(ym), payload)
+      .catch(() => toast('이달의 성경을 모임에 저장하지 못했어요 · 연결을 확인해 주세요'));
+  }
+  renderMonthly();
+  const added = syncCerts();
+  renderCerts();
+  const monthCert = added.find((c) => c.kind === 'month');
+  if (monthCert) { celebrateMonth(monthCert); }
+  toast(`📅 이달의 성경은 ${bookByCode[code].name}이에요`);
+}
+
+function celebrateMonth(cert) {
+  toast(`🏆 ${ymKo(cert.ym)} 이달의 성경 [${cert.name}] 완필! 상장이 도착했어요`, 5200);
+  burst(window.innerWidth / 2, 150, 16, 180);
+}
+
+/* ══════════════════════════════════════════════
+   축하 소식 게시판 (자동 축하 글 · 답글 · 새 소식 알림)
+   ══════════════════════════════════════════════ */
+const BOARD_READ_KEY = 'bible-typing-board-read';
+
+function newsPosts() {
+  const map = new Map();
+  if (social.room && social.mirror && social.mirror.posts && typeof social.mirror.posts === 'object') {
+    Object.keys(social.mirror.posts).forEach((k) => {
+      const p = social.mirror.posts[k];
+      if (p && typeof p === 'object') map.set(p.id || k, p);
+    });
+  }
+  (Array.isArray(state.posts) ? state.posts : []).forEach((p) => {
+    if (!p || !p.id) return;
+    if (!map.has(p.id)) map.set(p.id, p);
+  });
+  const order = { month: 0, streak: 1, book: 2, note: 3 };
+  return Array.from(map.values())
+    .filter((p) => p && p.text)
+    .sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0)
+      || (order[a.kind] != null ? order[a.kind] : 9) - (order[b.kind] != null ? order[b.kind] : 9));
+}
+
+function postTextOf() {
+  return newsPosts();
+}
+
+function newPostId(prefix) {
+  return `${prefix}-${social.myId || 'me'}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+}
+
+/** 축하 글 한 줄 올리기 (내 소식함 + 모임 방) */
+function addPost(fields) {
+  if (!Array.isArray(state.posts)) state.posts = [];
+  const id = fields.id || newPostId(fields.kind || 'note');
+  if (postTextOf().some((p) => p.id === id)) return null;
+  const myVerses = computeTotals().verses;
+  const post = Object.assign({
+    id,
+    kind: 'note',
+    name: nameOf(),
+    memberId: social.myId || 'me',
+    ts: Date.now(),
+    replies: {},
+    title: titleFor(myVerses),
+    titleVerses: myVerses,
+  }, fields, { id });
+  state.posts.push(post);
+  if (state.posts.length > 200) state.posts = state.posts.slice(-200);
+  saveNow();
+  if (social.room) {
+    if (!social.mirror) social.mirror = { members: {}, claps: {}, posts: {}, monthlyGoal: {} };
+    social.mirror.posts = social.mirror.posts || {};
+    social.mirror.posts[id] = post;
+    fbRequest('PUT', postNodeUrl(id), post).catch(() => { /* 나중에 다시 */ });
+  }
+  renderNews(true);
+  renderNewsPreview();
+  updateNewsBadge();
+  return post;
+}
+
+function postBook(code) {
+  const meta = bookByCode[code];
+  if (!meta) return null;
+  return addPost({
+    id: `book-${social.myId || 'me'}-${code}`,
+    kind: 'book',
+    code,
+    text: `🎉 ${nameOf()}님이 [${meta.name}]을 완필했어요!`,
+  });
+}
+
+function postMonth(ym, code) {
+  const meta = bookByCode[code];
+  if (!meta) return null;
+  return addPost({
+    id: `month-${social.myId || 'me'}-${ym}-${code}`,
+    kind: 'month',
+    code,
+    ym,
+    text: `🏆 ${nameOf()}님이 ${Number(String(ym).slice(5, 7))}월 이달의 성경 [${meta.name}]을 완필했어요!`,
+  });
+}
+
+function postStreak(n) {
+  return addPost({
+    id: `streak-${social.myId || 'me'}-${n}`,
+    kind: 'streak',
+    streak: n,
+    text: `🔥 ${nameOf()}님이 ${n}일 연속 출석을 달성했어요!`,
+  });
+}
+
+function addReply(postId, text) {
+  const t = String(text || '').trim().slice(0, 120);
+  if (!t || !postId) return false;
+  const reply = {
+    id: `r-${social.myId || 'me'}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
+    name: nameOf(),
+    memberId: social.myId || 'me',
+    text: t,
+    ts: Date.now(),
+  };
+  const local = (state.posts || []).find((p) => p.id === postId);
+  if (local) { local.replies = local.replies || {}; local.replies[reply.id] = reply; save(); }
+  if (social.mirror && social.mirror.posts && social.mirror.posts[postId]) {
+    const p = social.mirror.posts[postId];
+    p.replies = p.replies || {};
+    p.replies[reply.id] = reply;
+  }
+  if (social.room) {
+    fbRequest('PUT', replyNodeUrl(postId, reply.id), reply)
+      .catch(() => toast('답글을 올리지 못했어요 · 연결을 확인해 주세요'));
+  }
+  renderNews(true);
+  renderNewsPreview();
+  return true;
+}
+
+function boardReadAt() {
+  try {
+    const m = JSON.parse(localStorage.getItem(BOARD_READ_KEY) || '{}');
+    return Number(m[social.room || 'local']) || 0;
+  } catch (e) { return 0; }
+}
+function markBoardRead() {
+  try {
+    const m = JSON.parse(localStorage.getItem(BOARD_READ_KEY) || '{}');
+    m[social.room || 'local'] = Date.now();
+    localStorage.setItem(BOARD_READ_KEY, JSON.stringify(m));
+  } catch (e) { /* 무시 */ }
+}
+
+function unreadNews() {
+  const at = boardReadAt();
+  const out = [];
+  newsPosts().forEach((p) => {
+    if (p.memberId !== social.myId && (Number(p.ts) || 0) > at) out.push({ post: p });
+    Object.values(p.replies || {}).forEach((r) => {
+      if (r && r.memberId !== social.myId && (Number(r.ts) || 0) > at) out.push({ post: p, reply: r });
+    });
+  });
+  return out;
+}
+
+function updateNewsBadge() {
+  const n = unreadNews().length;
+  const txt = n > 9 ? '9+' : String(n);
+  [el.newsBadge, el.newsCardBadge].forEach((b) => {
+    if (!b) return;
+    b.hidden = n === 0;
+    b.textContent = txt;
+  });
+  [el.openNews, el.openNews2].forEach((b) => {
+    if (b) b.classList.toggle('is-alert', n > 0);
+  });
+}
+
+function timeAgo(ts) {
+  const t = Number(ts) || 0;
+  const diff = Date.now() - t;
+  if (diff < 60000) return '방금';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}분 전`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}시간 전`;
+  const d = new Date(t);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+const NEWS_ICON = { book: '🎉', month: '🏆', streak: '🔥', note: '💬' };
+
+function renderNewsPreview() {
+  if (!el.newsPreview) return;
+  const list = newsPosts();
+  if (!list.length) {
+    el.newsPreview.textContent = '아직 축하 소식이 없어요';
+    return;
+  }
+  const p = list[0];
+  const replies = Object.keys(p.replies || {}).length;
+  el.newsPreview.textContent = `${p.text}${replies ? ` · 답글 ${replies}` : ''}`;
+}
+
+let newsSig = '';
+let newsPending = false;
+
+function newsSignature() {
+  return newsPosts().map((p) => `${p.id}:${p.ts}:${Object.keys(p.replies || {}).length}`).join('|');
+}
+
+function renderNews(force = false) {
+  if (!el.newsList) return;
+  const active = document.activeElement;
+  if (!force && active && el.newsList.contains(active) && active.tagName === 'INPUT') {
+    newsPending = true;
+    return;
+  }
+  const sig = newsSignature();
+  if (!force && sig === newsSig) return;
+  newsSig = sig;
+  newsPending = false;
+
+  const list = newsPosts();
+  el.newsList.innerHTML = '';
+  if (!list.length) {
+    const p = document.createElement('p');
+    p.className = 'news-empty';
+    p.innerHTML = '아직 축하 소식이 없어요.<br>한 권을 완필하거나 연속 출석을 이어 가면 여기에 저절로 올라와요 🌸';
+    el.newsList.appendChild(p);
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  list.forEach((post) => {
+    const art = document.createElement('article');
+    art.className = 'news-post';
+    art.dataset.post = post.id;
+
+    const head = document.createElement('div');
+    head.className = 'np-head';
+    const who = document.createElement('b');
+    who.className = 'np-who';
+    who.textContent = post.name || '가족';
+    const when = document.createElement('span');
+    when.className = 'np-time';
+    when.textContent = timeAgo(post.ts);
+    head.append(who, when);
+    const tier = post.title || '';
+    if (tier) {
+      const tb = document.createElement('em');
+      tb.className = 'title-badge ' + titleTier(post.titleVerses != null ? post.titleVerses : 0).cls;
+      tb.textContent = tier;
+      head.appendChild(tb);
+    }
+    art.appendChild(head);
+
+    const txt = document.createElement('p');
+    txt.className = 'np-text';
+    txt.textContent = post.text;
+    art.appendChild(txt);
+
+    const replies = Object.values(post.replies || {}).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    if (replies.length) {
+      const box = document.createElement('div');
+      box.className = 'np-replies';
+      replies.forEach((r) => {
+        const row = document.createElement('div');
+        row.className = 'np-reply';
+        const b = document.createElement('b');
+        b.textContent = r.name || '가족';
+        row.appendChild(b);
+        row.appendChild(document.createTextNode(r.text || ''));
+        const t = document.createElement('span');
+        t.className = 'np-rt';
+        t.textContent = timeAgo(r.ts);
+        row.appendChild(t);
+        box.appendChild(row);
+      });
+      art.appendChild(box);
+    }
+
+    const form = document.createElement('div');
+    form.className = 'np-form';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'np-input';
+    input.maxLength = 120;
+    input.placeholder = '축하드려요! 🌸';
+    input.setAttribute('aria-label', `${post.name || '가족'}님 축하 글에 답글`);
+    input.dataset.replyTo = post.id;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'np-send';
+    btn.dataset.reply = post.id;
+    btn.textContent = '답글';
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      if (addReply(post.id, input.value)) { input.value = ''; }
+    });
+    form.append(input, btn);
+    art.appendChild(form);
+    frag.appendChild(art);
+  });
+  el.newsList.appendChild(frag);
+}
+
+function openNews() {
+  renderNews(true);
+  el.newsOverlay.hidden = false;
+  markBoardRead();
+  updateNewsBadge();
+}
+function closeNews() { el.newsOverlay.hidden = true; }
+
+/** 새 소식이 들어오면 토스트 · 배지 반짝 */
+function detectNews() {
+  const list = newsPosts();
+  if (social.newsBase == null) {
+    social.newsBase = Date.now() - 1200;
+    if (!social.newsSeen) social.newsSeen = {};
+    list.forEach((p) => {
+      social.newsSeen[`p:${p.id}`] = 1;
+      Object.keys(p.replies || {}).forEach((r) => { social.newsSeen[`r:${p.id}:${r}`] = 1; });
+    });
+    return;
+  }
+  const fresh = [];
+  list.forEach((p) => {
+    const pk = `p:${p.id}`;
+    if (p.memberId !== social.myId && (Number(p.ts) || 0) > social.newsBase && !social.newsSeen[pk]) {
+      social.newsSeen[pk] = 1;
+      fresh.push({ post: p });
+    }
+    Object.keys(p.replies || {}).forEach((rid) => {
+      const r = p.replies[rid];
+      const rk = `r:${p.id}:${rid}`;
+      if (r && r.memberId !== social.myId && (Number(r.ts) || 0) > social.newsBase && !social.newsSeen[rk]) {
+        social.newsSeen[rk] = 1;
+        fresh.push({ post: p, reply: r });
+      }
+    });
+  });
+  updateNewsBadge();
+  renderNewsPreview();
+  if (!fresh.length) return;
+  if (!el.newsOverlay.hidden) { markBoardRead(); updateNewsBadge(); return; }
+  const last = fresh[fresh.length - 1];
+  const who = (last.reply && last.reply.name) || last.post.name || '가족';
+  toast(`💬 ${who}님이 새 축하/답글을 남겼어요!`, 4400);
+  burst(window.innerWidth / 2, 150, 9, 150);
+}
+
+/** 모임에 들어갈 때 이 기기의 축하 소식을 방으로 올린다 */
+function flushLocalPosts() {
+  if (!social.room) return;
+  (state.posts || []).forEach((p) => {
+    if (!p || !p.id || p.pushed) return;
+    fbRequest('PUT', postNodeUrl(p.id), p)
+      .then(() => { p.pushed = true; save(); })
+      .catch(() => { /* 다음 연결에서 */ });
+  });
 }
 
 /* 오늘 완료한 글자 수가 예전 기록에 없으면 한 번 계산해 채운다 */
@@ -1794,12 +2462,54 @@ async function ensureTodayChars() {
   if (sum > 0) { d.ch = sum; saveNow(); }
 }
 
+function sendNote() {
+  const t = (el.newsInput.value || '').trim();
+  if (!t) {
+    toast('한 줄 응원을 적어 주세요 🌸');
+    try { el.newsInput.focus(); } catch (e) { /* 무시 */ }
+    return;
+  }
+  if (addPost({ kind: 'note', text: t })) {
+    el.newsInput.value = '';
+    markBoardRead();
+    updateNewsBadge();
+    toast('축하 소식을 올렸어요 💬');
+  }
+}
+
 function bindSocial() {
   el.shareBtn.addEventListener('click', openShareSheet);
   el.copyInvite.addEventListener('click', (e) => { e.stopPropagation(); copyInvite(); });
   el.openHall.addEventListener('click', () => openHall('hall'));
   el.rankHall.addEventListener('click', () => openHall('hall'));
   el.rankInvite.addEventListener('click', openShareSheet);
+
+  // 이달의 성경
+  if (el.goalSave) el.goalSave.addEventListener('click', () => setGoal(el.goalSelect.value));
+
+  // 축하 소식 게시판
+  if (el.openNews) el.openNews.addEventListener('click', openNews);
+  if (el.openNews2) el.openNews2.addEventListener('click', openNews);
+  if (el.newsClose) el.newsClose.addEventListener('click', closeNews);
+  if (el.newsOverlay) el.newsOverlay.addEventListener('click', (e) => { if (e.target === el.newsOverlay) closeNews(); });
+  if (el.newsSend) el.newsSend.addEventListener('click', sendNote);
+  if (el.newsInput) el.newsInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    sendNote();
+  });
+  if (el.newsList) {
+    el.newsList.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-reply]');
+      if (!b) return;
+      const art = b.closest('.news-post');
+      const input = art && art.querySelector('.np-input');
+      if (addReply(b.dataset.reply, input ? input.value : '') && input) input.value = '';
+    });
+    el.newsList.addEventListener('focusout', () => {
+      setTimeout(() => { if (newsPending) renderNews(true); }, 60);
+    });
+  }
 
   el.shareClose.addEventListener('click', closeShareSheet);
   el.shareDismiss.addEventListener('click', closeShareSheet);
@@ -1839,6 +2549,7 @@ function bindSocial() {
     if (e.key !== 'Escape') return;
     if (!el.certOverlay.hidden) { closeCert(); return; }
     if (!el.hallOverlay.hidden) { el.hallOverlay.hidden = true; return; }
+    if (el.newsOverlay && !el.newsOverlay.hidden) { closeNews(); return; }
     if (!el.shareOverlay.hidden) { closeShareSheet(); return; }
   });
 
@@ -1861,6 +2572,11 @@ function initSocial() {
   renderRank();
   renderCerts();
   updateCertCount();
+  renderAttendance();
+  renderMonthly();
+  renderNews(true);
+  renderNewsPreview();
+  updateNewsBadge();
   if (social.room) connectRoom();
   if (social.invited && !social.name) {
     setTimeout(() => {
@@ -1929,6 +2645,8 @@ function importJSON(file) {
       s.days = incoming.days || {};
       s.stamps = Array.isArray(incoming.stamps) ? incoming.stamps : [];
       s.certs = Array.isArray(incoming.certs) ? incoming.certs : [];
+      s.monthly = (incoming.monthly && typeof incoming.monthly === 'object') ? incoming.monthly : {};
+      s.posts = Array.isArray(incoming.posts) ? incoming.posts : [];
       s.last = Object.assign({ code: 'gen', ch: 1, vi: 0 }, incoming.last || {});
       s.settings = Object.assign({ fs: 'md' }, incoming.settings || {});
       state = s;

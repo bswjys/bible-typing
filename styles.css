@@ -855,6 +855,12 @@ body[data-fs="lg"]{--verse-size:40px}
 /* ── 좁은 화면 ── */
 @media (max-width:1120px){
   .brand-badge{display:none}
+  /* 버튼이 늘어나도 제목과 겹치지 않게: 제목 줄과 도구 줄을 나눔 */
+  .topbar-in{flex-wrap:wrap;row-gap:9px}
+  .brand{flex:1 1 100%;justify-content:center}
+  .topbar-tools{flex:1 1 100%;justify-content:space-between;flex-wrap:wrap;row-gap:8px}
+  .news-btn-text{display:none}
+  .news-btn{padding:8px 10px}
 }
 @media (max-width:1120px){
   .share-label,.hall-btn-text{display:none}
@@ -914,3 +920,195 @@ body[data-fs="lg"]{--verse-size:40px}
 .share-actions .ctrl-btn.ghost{
   color:var(--ink-2);background:#fff;border:1px solid var(--line);
 }
+
+/* ══════════════════════════════════════════════
+   자동 출석 · 칭호 · 이달의 성경 · 축하 소식
+   ══════════════════════════════════════════════ */
+
+/* ── 머리글: 축하 소식 버튼 ── */
+.news-btn{position:relative;gap:6px}
+.news-btn-icon{font-size:14px;line-height:1}
+.news-badge{
+  min-width:16px;height:16px;padding:0 4px;border-radius:999px;
+  display:inline-grid;place-items:center;flex:none;
+  background:#E4648A;color:#fff;font-size:9.5px;font-weight:900;letter-spacing:0;
+  box-shadow:0 1px 3px rgba(196,72,63,.35);
+}
+.news-btn.is-alert{border-color:#F3C2D2;background:#FFF6F9;color:#B4576F;animation:newsPulse 1.9s ease-in-out infinite}
+.news-btn.is-alert .news-btn-icon{animation:newsWiggle 2.6s ease-in-out infinite}
+@keyframes newsPulse{0%,100%{box-shadow:0 0 0 0 rgba(228,100,138,.35)}50%{box-shadow:0 0 0 5px rgba(228,100,138,0)}}
+@keyframes newsWiggle{0%,88%,100%{transform:rotate(0)}91%{transform:rotate(-11deg)}94%{transform:rotate(9deg)}97%{transform:rotate(-5deg)}}
+@media (prefers-reduced-motion:reduce){
+  .news-btn.is-alert,.news-btn.is-alert .news-btn-icon{animation:none}
+}
+
+/* ── 이달의 성경 카드 ── */
+.goal-card{padding-bottom:12px}
+.goal-month{font-style:normal;font-size:10px;font-weight:800;color:var(--ink-3);margin-left:auto;letter-spacing:0}
+.goal-dot{background:var(--gold);box-shadow:0 0 0 3px #FBF0D4}
+.goal-main{margin-bottom:10px}
+.goal-row{display:flex;align-items:baseline;justify-content:space-between;gap:6px}
+.goal-name{font-size:14px;font-weight:800;letter-spacing:-.03em;color:var(--ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.goal-name i{font-style:normal;font-size:10px;font-weight:700;color:var(--ink-3);margin-left:2px}
+.goal-num{font-size:11.5px;font-weight:800;color:var(--ink-2);white-space:nowrap;font-variant-numeric:tabular-nums}
+.goal-num b{font-size:15px;color:#A98A34;letter-spacing:-.03em}
+.goal-bar{height:7px;border-radius:999px;background:#F3E8D6;overflow:hidden;margin-top:7px}
+.goal-bar span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#EFCE7C,#D8A64F);transition:width .4s}
+.goal-done{font-size:10.5px;font-weight:800;color:#8A6420;margin-top:6px}
+.goal-none{font-size:11.5px;color:var(--ink-3);font-weight:700;line-height:1.55}
+.goal-none span{color:#A98A34;font-weight:800}
+.goal-set{display:flex;gap:6px;align-items:center}
+.goal-select{
+  flex:1 1 auto;min-width:0;appearance:none;-webkit-appearance:none;
+  font:inherit;font-size:12px;font-weight:700;color:var(--ink);
+  padding:8px 26px 8px 10px;border-radius:11px;
+  border:1px solid var(--line);background:#FFFDF7;
+  background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23A99A87' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 9px center;
+}
+.goal-save{
+  flex:none;padding:8px 12px;border-radius:11px;
+  background:#FBF3E2;border:1px solid #F0E2C8;color:#8A6420;
+  font-size:12px;font-weight:800;white-space:nowrap;
+  transition:background .15s,transform .12s;
+}
+.goal-save:hover{background:#F8EDD6}
+.goal-save:active{transform:translateY(1px)}
+.goal-note{font-size:10px;color:var(--ink-3);font-weight:600;line-height:1.55;margin-top:8px}
+
+/* ── 출석 꽃밭 카드 ── */
+.att-card{padding-bottom:12px}
+.att-month{font-style:normal;font-size:10px;font-weight:800;color:var(--ink-3);margin-left:auto}
+.att-dot{background:var(--leaf-2);box-shadow:0 0 0 3px var(--leaf-soft)}
+.att-badges{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.att-badge{
+  font-size:11px;font-weight:800;color:var(--ink-3);
+  background:#F7F1E4;border:1px solid var(--line);border-radius:999px;padding:3px 9px;
+}
+.att-badge.is-on{color:#3E7350;background:var(--leaf-soft);border-color:#CFE4CF}
+.att-streak{
+  font-size:11px;font-weight:800;color:#A2701F;
+  background:#FBF0D4;border:1px solid #F0DFAE;border-radius:999px;padding:3px 9px;
+}
+.att-streak.is-hot{color:#B4576F;background:var(--rose-soft);border-color:#F7D9E2}
+.att-garden{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin:10px 0 2px}
+.att-cell{
+  aspect-ratio:1;border-radius:9px;display:grid;place-items:center;
+  font-size:12px;line-height:1;color:#D8CCB8;
+  background:#F8F2E6;border:1px dashed #EFE4D1;
+}
+.att-cell.has{background:var(--rose-soft);border:1px solid #F7D9E2;color:#B4576F}
+.att-cell.today{box-shadow:inset 0 0 0 2px var(--rose)}
+.att-cell.today.has{background:var(--leaf-soft);border-color:#CFE4CF;box-shadow:inset 0 0 0 2px var(--leaf)}
+.att-cell.today:not(.has){color:#C9BBA4}
+.att-title-line{font-size:10.5px;color:var(--ink-3);font-weight:700;margin-top:8px;display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.att-title-line b{font-size:11px;color:#A94A64;font-weight:800}
+.att-title-line em{font-style:normal;font-size:9.5px;color:var(--ink-3);font-weight:700}
+
+/* ── 칭호 배지 ── */
+.title-badge{
+  font-style:normal;font-size:8.5px;font-weight:900;letter-spacing:-.01em;
+  padding:0 5px;border-radius:999px;line-height:1.6;white-space:nowrap;flex:none;
+  color:#4B8460;background:var(--leaf-soft);border:1px solid #D8E8D6;
+}
+.title-badge.t-flower{color:#B4576F;background:var(--rose-soft);border-color:#F7DCE4}
+.title-badge.t-scribe{color:#4F7FA6;background:var(--sky-soft);border-color:#D6E4F0}
+.title-badge.t-crown{color:#8A6420;background:#FBF0D4;border-color:#F0DFAE}
+
+/* ── 순위표: 칭호 · 연속 출석 한 줄 ── */
+.rank-name{display:flex;flex-direction:column;align-items:flex-start;gap:1px;overflow:hidden}
+.rank-who{display:flex;align-items:center;gap:4px;min-width:0;max-width:100%;overflow:hidden}
+.rank-meta{display:flex;align-items:center;gap:4px;min-width:0;max-width:100%;overflow:hidden}
+.rank-streak{font-size:8.5px;font-weight:900;color:#A2701F;white-space:nowrap;flex:none}
+.rank-streak.is-hot{color:#B4576F}
+
+/* ── 축하 소식 요약 카드 ── */
+.news-card{
+  display:flex;flex-direction:column;align-items:flex-start;gap:6px;
+  text-align:left;background:#FFF8F3;border-color:#F5E2DA;
+  transition:transform .12s,background .15s,box-shadow .15s;
+}
+.news-card:hover{background:#FFF2EB;box-shadow:0 6px 16px -12px rgba(180,87,111,.7)}
+.news-card:active{transform:translateY(1px)}
+.news-card.is-alert{border-color:#F3C2D2;background:#FFF6F9}
+.news-card-head{display:flex;align-items:center;gap:7px;width:100%}
+.news-card-title{font-size:12.5px;font-weight:800;color:#B4576F}
+.news-badge.is-soft{background:#F7DCE4;color:#A94A64;box-shadow:none;margin-left:auto}
+.news-preview{
+  font-size:11px;font-weight:600;color:var(--ink-2);line-height:1.55;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  word-break:keep-all;width:100%;
+}
+.news-card-foot{font-size:10px;font-weight:900;color:#C77E93;letter-spacing:.02em}
+
+/* ── 축하 소식 게시판 ── */
+.news-sheet{width:min(680px,100%)}
+.news-compose{display:flex;gap:8px;margin-bottom:12px}
+.news-input{
+  flex:1 1 auto;min-width:0;font:inherit;font-size:13px;color:var(--ink);
+  padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:#FFFDF7;
+}
+.news-input::placeholder{color:#BDAE9A}
+.news-input:focus{outline:none;border-color:var(--rose-2);box-shadow:0 0 0 3px rgba(238,185,201,.35)}
+.news-send{padding:10px 14px;border-radius:12px;font-size:12.5px;flex:none}
+.news-body{overflow-y:auto;min-height:140px;max-height:min(56vh,520px);padding-right:6px;scrollbar-width:thin}
+.news-empty{text-align:center;color:var(--ink-3);font-size:12.5px;font-weight:600;line-height:1.8;padding:30px 10px}
+.news-post{
+  background:var(--card-2);border:1px solid var(--line-2);border-radius:16px;
+  padding:11px 12px;margin-bottom:9px;
+}
+.news-post.is-new{border-color:#F3C2D2;background:#FFF8FA;animation:newsPop .35s cubic-bezier(.2,1.3,.4,1) both}
+@keyframes newsPop{from{transform:scale(.97);opacity:.4}to{transform:none;opacity:1}}
+.np-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.np-ico{font-size:14px;line-height:1}
+.np-who{font-size:12.5px;font-weight:800;letter-spacing:-.02em;color:var(--ink)}
+.np-time{font-size:9.5px;font-weight:700;color:var(--ink-3)}
+.np-head .title-badge{margin-left:auto}
+.np-text{font-size:13px;font-weight:700;color:var(--ink);line-height:1.6;margin-top:5px;word-break:keep-all}
+.np-replies{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.np-reply{
+  font-size:11.5px;font-weight:600;color:var(--ink-2);line-height:1.55;
+  background:#FFFDF7;border:1px solid var(--line-2);border-radius:10px;padding:6px 9px;
+}
+.np-reply b{font-size:11.5px;color:#A94A64;margin-right:5px}
+.np-reply .np-rt{font-size:9px;color:var(--ink-3);margin-left:5px;font-weight:700}
+.np-form{display:flex;gap:6px;margin-top:8px}
+.np-input{
+  flex:1 1 auto;min-width:0;font:inherit;font-size:11.5px;color:var(--ink);
+  padding:7px 10px;border-radius:10px;border:1px solid var(--line);background:#fff;
+}
+.np-input::placeholder{color:#C2B4A1}
+.np-input:focus{outline:none;border-color:var(--rose-2);box-shadow:0 0 0 3px rgba(238,185,201,.3)}
+.np-send{
+  flex:none;padding:7px 11px;border-radius:10px;font-size:11px;font-weight:800;
+  background:var(--rose-soft);border:1px solid #F7D9E2;color:#B4576F;white-space:nowrap;
+}
+.np-send:hover{background:#FADDE6}
+
+/* ── 달력: 오늘 출석 표시 ── */
+.cal .day.today.att{background:var(--leaf-soft);color:#3E7350;box-shadow:inset 0 0 0 2px var(--leaf)}
+.cal .day.today.att::after{content:"✅";font-size:8px}
+
+/* ── 좁은 화면 ── */
+@media (max-width:1120px){
+  .rail .goal-card{grid-column:span 2}
+}
+@media (max-width:860px){
+  .rail .goal-card,.rail .att-card{grid-column:span 2}
+  .news-sheet .news-body{max-height:min(52vh,460px)}
+}
+@media (max-width:600px){
+  .news-btn-text{display:none}
+  .news-btn{padding:7px 9px}
+  .news-badge{position:absolute;top:-3px;right:-3px;min-width:14px;height:14px;font-size:9px}
+  .goal-select{font-size:11.5px}
+  .news-compose{flex-wrap:wrap}
+  .news-send{flex:1 1 100%}
+}
+@media (max-width:720px){
+  .topbar-tools{flex-wrap:wrap;row-gap:8px}
+  .topbar-tools .fs-group{flex:1 1 100%}
+}
+
+/* 명예의 전당: 연속 출석 */
+.hall-streak{font-size:10px;font-weight:800;color:#A2701F;white-space:nowrap}

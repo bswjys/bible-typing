@@ -53,7 +53,7 @@ def wait_live(page):
 with sync_playwright() as p:
     browser = p.chromium.launch()
 
-    for asset in ['', 'index.html', 'app.js?v=3', 'styles.css?v=3', 'sw.js', 'data/index.json']:
+    for asset in ['', 'index.html', 'app.js?v=4', 'styles.css?v=4', 'sw.js', 'data/index.json']:
         with urllib.request.urlopen(URL + asset, timeout=20) as r:
             check(f'HTTP 200 — /{asset}', r.status == 200, r.status)
 
@@ -67,7 +67,7 @@ with sync_playwright() as p:
     check('라이브 본문 로드', page.inner_text('#verseText').strip() == '태초에 하나님이 천지를 창조하시니라',
           page.inner_text('#verseText'))
     check('라이브 등수 패널', page.is_visible('#rankCard'))
-    check('라이브 sw v3 등록', page.evaluate(
+    check('라이브 sw v4 등록', page.evaluate(
         "async () => { const r = await navigator.serviceWorker.getRegistration(); return !!r; }"))
     page.screenshot(path=os.path.join(SHOTS, 'live_main_1280.png'))
 
@@ -94,6 +94,29 @@ with sync_playwright() as p:
     page.wait_for_timeout(1200)
     check('라이브 타자 → 다음 절', page.inner_text('#refLabel').strip() == '창세기 1장 2절',
           page.inner_text('#refLabel'))
+
+    # v4: 자동 출석 · 칭호 · 이달의 성경 · 축하 소식
+    check('라이브 자동 출석 (✅ 오늘 출석)', page.inner_text('#attToday').strip() == '✅ 오늘 출석',
+          page.inner_text('#attToday'))
+    check('라이브 연속 출석 (🔥 1일 연속)', '🔥 1일 연속' in page.inner_text('#attStreak'),
+          page.inner_text('#attStreak'))
+    check('라이브 칭호 배지 (순위표)', '타자수' in page.inner_text('#rankList'),
+          page.inner_text('#rankList'))
+    check('라이브 이달의 성경 카드', page.is_visible('#goalCard'))
+    page.screenshot(path=os.path.join(SHOTS, 'live_v4_monthly_1280.png'))
+
+    check('라이브 💬 축하 소식 버튼', page.is_visible('#openNews'))
+    page.click('#openNews')
+    page.wait_for_timeout(500)
+    check('라이브 축하 소식 게시판 열림', page.is_visible('#newsOverlay'))
+    page.fill('#newsInput', '오늘도 말씀과 함께 🌸')
+    page.click('#newsSend')
+    page.wait_for_timeout(500)
+    check('라이브 한 줄 응원 등록', page.locator('#newsList .news-post').count() == 1,
+          page.locator('#newsList .news-post').count())
+    page.screenshot(path=os.path.join(SHOTS, 'live_v4_board_1280.png'))
+    page.click('#newsClose')
+    page.wait_for_timeout(200)
 
     # 라이브 실시간 모임 (두 브라우저)
     def init_room(name):
