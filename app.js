@@ -178,6 +178,40 @@ const el = {
   newsNote: $('#newsNote'),
 };
 
+/* ───────── 모달·추가창 화면 고정 (2026-11-28) ─────────
+   오버레이가 하나라도 열려 있으면 body를 fixed로 잠가 배경이 흔들리지 않게 하고,
+   모두 닫힐 때 여는 순간의 스크롤 위치로 돌아간다. */
+const MODAL_OVERLAY_IDS = ['chapterOverlay', 'shareOverlay', 'hallOverlay', 'certOverlay', 'boardOverlay', 'newsOverlay'];
+let lockedScrollY = null;
+function syncModalLock() {
+  const anyOpen = MODAL_OVERLAY_IDS.some((id) => {
+    const n = document.getElementById(id);
+    return n && !n.hidden;
+  });
+  const isLocked = document.body.classList.contains('modal-open');
+
+  if (anyOpen && !isLocked) {
+    lockedScrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
+    document.body.style.top = `-${lockedScrollY}px`;
+    document.body.classList.add('modal-open');
+  } else if (!anyOpen && isLocked) {
+    document.body.classList.remove('modal-open');
+    document.body.style.top = '';
+    const backY = lockedScrollY || 0;
+    lockedScrollY = null;
+    window.scrollTo(0, backY);
+  }
+}
+
+function watchModalLock() {
+  MODAL_OVERLAY_IDS.forEach((id) => {
+    const n = document.getElementById(id);
+    if (!n) return;
+    new MutationObserver(syncModalLock).observe(n, { attributes: true, attributeFilter: ['hidden'] });
+  });
+  syncModalLock();
+}
+
 /* ───────── 상태 ───────── */
 let INDEX = null;
 let BOOKS = {};            // code -> book data
@@ -2806,6 +2840,7 @@ async function init() {
   loadState();
   applySettings();
   bind();
+  watchModalLock();
   loadSocial();
   bindSocial();
 
