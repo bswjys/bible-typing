@@ -1,10 +1,10 @@
 /* 성경 타자 — 오프라인에서도 열리도록 (앱 껍데기 + 읽은 성경 캐시) */
-const VERSION = 'bible-typing-v4';
+const VERSION = 'bible-typing-v5';
 const SHELL = [
   './',
   './index.html',
-  './styles.css?v=4',
-  './app.js?v=4',
+  './styles.css?v=5',
+  './app.js?v=5',
   './manifest.webmanifest',
   './icon.svg',
   './icon-180.png',

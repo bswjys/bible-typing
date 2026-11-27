@@ -739,7 +739,7 @@ body[data-fs="lg"]{--verse-size:40px}
 .field span{font-size:11px;font-weight:800;color:var(--ink-3);letter-spacing:.03em}
 .field input{
   width:100%;border:1px solid var(--line);border-radius:12px;background:#fff;
-  padding:11px 13px;font:inherit;font-size:14px;font-weight:700;color:var(--ink);
+  padding:11px 13px;font:inherit;font-size:16px;font-weight:700;color:var(--ink);
   outline:none;transition:border-color .15s,box-shadow .15s;
 }
 .field input:focus{border-color:var(--rose-2);box-shadow:0 0 0 3px rgba(238,185,201,.22)}
@@ -960,7 +960,7 @@ body[data-fs="lg"]{--verse-size:40px}
 .goal-set{display:flex;gap:6px;align-items:center}
 .goal-select{
   flex:1 1 auto;min-width:0;appearance:none;-webkit-appearance:none;
-  font:inherit;font-size:12px;font-weight:700;color:var(--ink);
+  font:inherit;font-size:16px;font-weight:700;color:var(--ink);
   padding:8px 26px 8px 10px;border-radius:11px;
   border:1px solid var(--line);background:#FFFDF7;
   background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23A99A87' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
@@ -1045,7 +1045,7 @@ body[data-fs="lg"]{--verse-size:40px}
 .news-sheet{width:min(680px,100%)}
 .news-compose{display:flex;gap:8px;margin-bottom:12px}
 .news-input{
-  flex:1 1 auto;min-width:0;font:inherit;font-size:13px;color:var(--ink);
+  flex:1 1 auto;min-width:0;font:inherit;font-size:16px;color:var(--ink);
   padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:#FFFDF7;
 }
 .news-input::placeholder{color:#BDAE9A}
@@ -1074,7 +1074,7 @@ body[data-fs="lg"]{--verse-size:40px}
 .np-reply .np-rt{font-size:9px;color:var(--ink-3);margin-left:5px;font-weight:700}
 .np-form{display:flex;gap:6px;margin-top:8px}
 .np-input{
-  flex:1 1 auto;min-width:0;font:inherit;font-size:11.5px;color:var(--ink);
+  flex:1 1 auto;min-width:0;font:inherit;font-size:16px;color:var(--ink);
   padding:7px 10px;border-radius:10px;border:1px solid var(--line);background:#fff;
 }
 .np-input::placeholder{color:#C2B4A1}
@@ -1101,7 +1101,7 @@ body[data-fs="lg"]{--verse-size:40px}
   .news-btn-text{display:none}
   .news-btn{padding:7px 9px}
   .news-badge{position:absolute;top:-3px;right:-3px;min-width:14px;height:14px;font-size:9px}
-  .goal-select{font-size:11.5px}
+  .goal-select{font-size:16px}
   .news-compose{flex-wrap:wrap}
   .news-send{flex:1 1 100%}
 }
@@ -1112,3 +1112,16 @@ body[data-fs="lg"]{--verse-size:40px}
 
 /* 명예의 전당: 연속 출석 */
 .hall-streak{font-size:10px;font-weight:800;color:#A2701F;white-space:nowrap}
+
+/* ===== 아이폰 화면 고정 (2026-11-28) =====
+   사파리·홈 화면 앱에서 화면이 커졌다 작아졌다 하지 않도록
+   - 입력창 글자는 16px 이상(아이폰 자동 확대 방지)
+   - 가로 넘침·바운스 스크롤 막음, 글자 자동 확대 막음 */
+html, body {
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+html { touch-action: manipulation; }
+input, textarea, select { font-size: max(16px, 1em); }
